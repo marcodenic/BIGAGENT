@@ -23,19 +23,26 @@ import {
 } from "./core/workstreams";
 import "./styles.css";
 
-const faces: Record<AgentStatus, string> = {
-  idle: "-_-",
-  thinking: "-_-",
-  searching: ">_>",
-  working: "-_-",
-  command: "-_-",
-  editing: "-_-",
-  testing: "-_-",
-  waiting: "?",
-  approval: "?",
-  complete: "^_^",
-  error: "x_x",
+const faces: Record<AgentStatus, string[]> = {
+  idle: ["-_-"],
+  thinking: ["-_-", "._.", "-_-", "o_o"],
+  searching: [">_>", ">_>", "<_<"],
+  working: ["o_o", "-_-", "o_o", "..."],
+  command: [">_>", "._.", "<_<"],
+  editing: ["._.", "-_-", "._+"],
+  testing: ["?_?", "o_o", "?_?"],
+  waiting: ["?", "._.", "?"],
+  approval: ["?", "!_!", "?"],
+  complete: ["^_^"],
+  error: ["x_x", "X_X"],
 };
+
+function faceFor(workstream: Workstream, now: number) {
+  const variants = faces[workstream.status];
+  const offset = [...workstream.id].reduce((total, character) => total + character.charCodeAt(0), 0);
+  const cadence = workstream.attention ? 3_000 : 6_000;
+  return variants[(Math.floor(now / cadence) + offset) % variants.length];
+}
 
 const activityLabels: Record<AgentStatus, string> = {
   idle: "IDLE", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "TOOL",
@@ -226,7 +233,7 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
 function WorkstreamRow({ workstream, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
-  const face = faces[workstream.status];
+  const face = faceFor(workstream, now);
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
   return <article className={`workstream status-${workstream.status} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
@@ -351,7 +358,7 @@ function App() {
       ? `${plural(completedAgents.length, "AGENT")} COMPLETED · LAST ${relativeTime(Math.max(...completedAgents.map((agent) => agent.state.endedAt ?? agent.updatedAt)), now)}`
       : "WAITING FOR AN AGENT";
 
-  return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${attentionCount ? "has-attention" : ""}`}>
+  return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header data-tauri-drag-region onMouseDown={beginDrag}>
       <div className="brand" data-tauri-drag-region><span className="brand-face">-_</span><b>BIG AGENT</b></div>
       <div className="summary" data-tauri-drag-region>{summary}</div>
