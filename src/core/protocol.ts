@@ -4,7 +4,7 @@ export type EventKind = "session.start" | "session.end" | "turn.start" | "turn.e
 
 export interface AgentEvent {
   version: 1; id: string; timestamp: string; kind: EventKind; status?: AgentStatus;
-  label?: string; detail?: string; files?: string[]; command?: string; exitCode?: number;
+  label?: string; detail?: string; files?: string[]; command?: string; tool?: string; target?: string; exitCode?: number;
   plan?: string[]; usage?: { inputTokens?: number; outputTokens?: number }; meta?: Record<string, unknown>;
 }
 
@@ -16,7 +16,7 @@ export function isAgentEvent(value: unknown): value is AgentEvent {
 }
 
 /** Convenience JSONL shape accepted by `big-agent emit` and the local protocol. */
-export interface SimpleEvent { status: AgentStatus; label?: string; detail?: string; files?: string[]; command?: string; exitCode?: number }
+export interface SimpleEvent { status: AgentStatus; label?: string; detail?: string; files?: string[]; command?: string; tool?: string; target?: string; exitCode?: number; meta?: Record<string, unknown> }
 export function normalizeSimpleEvent(value: SimpleEvent, id: string = crypto.randomUUID()): AgentEvent {
   const kind: EventKind = value.status === "complete" ? "complete" : value.status === "error" ? "error" : value.status === "approval" ? "approval.requested" : value.status === "waiting" ? "input.requested" : value.status === "command" ? "command.start" : value.status === "editing" ? "files.changed" : "activity";
   return { version: 1, id, timestamp: new Date().toISOString(), kind, ...value };

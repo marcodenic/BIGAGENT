@@ -3,9 +3,9 @@ import type { AgentEvent, AgentStatus } from "./protocol";
 export interface DisplayState {
   status: AgentStatus; label: string; detail: string; files: string[]; plan: string[]; recent: AgentEvent[];
   startedAt: number | null; stateSince: number; endedAt: number | null; attention: boolean; error: string | null;
-  sessionName: string; project: string; branch: string; usage?: AgentEvent["usage"];
+  sessionName: string; project: string; branch: string; command: string; tool: string; target: string; usage?: AgentEvent["usage"];
 }
-export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main" };
+export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "" };
 const labels: Record<AgentStatus, string> = { idle: "READY", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "RUNNING", editing: "EDITING", testing: "RUNNING TESTS", waiting: "NEEDS YOU", approval: "NEEDS YOU", complete: "DONE", error: "SOMETHING BROKE" };
 const active = new Set<AgentStatus>(["thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval"]);
 export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.now()): DisplayState {
@@ -20,6 +20,9 @@ export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.n
   if (event.kind === "session.end" || event.kind === "turn.end") next.endedAt = now;
   if (event.kind === "plan" && event.plan) next.plan = event.plan;
   if (event.files?.length) next.files = event.files;
+  if (event.command !== undefined) next.command = event.command;
+  if (event.tool !== undefined) next.tool = event.tool;
+  if (event.target !== undefined) next.target = event.target;
   if (status !== state.status) next.stateSince = now;
   next.status = status;
   // A protocol producer may omit explicit session boundaries; the first active status still starts a useful timer.

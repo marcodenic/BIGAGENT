@@ -18,4 +18,4 @@ The complete versioned form is:
 
 Supported kinds: `session.start`, `session.end`, `turn.start`, `turn.end`, `activity`, `reasoning.summary`, `plan`, `command.start`, `command.end`, `files.changed`, `test.result`, `approval.requested`, `input.requested`, `error`, `complete`, and `usage`. `reasoning.summary` means a short summary the agent chose to expose; BIG AGENT neither requests nor presents private chain-of-thought.
 
-Optional fields are `label`, `detail`, `files`, `command`, `exitCode`, `plan`, `usage`, and `meta`. Malformed JSON is rejected with HTTP 400.
+Optional fields are `label`, `detail`, `files`, `command`, `tool`, `target`, `exitCode`, `plan`, `usage`, and `meta`. Workstream-aware producers should set `meta.sessionId`, `meta.workstreamId`, `meta.workstreamName`, and optionally `meta.agentName`. Sessions sharing a `workstreamId` render together. Malformed JSON is rejected with HTTP 400.

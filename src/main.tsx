@@ -1,37 +1,355 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
-import { elapsedMs, formatElapsed, initialState, reduceEvent, type DisplayState } from "./core/reducer";
-import { mockDelay, mockEvent, mockLength } from "./core/mock";
+import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
+import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg";
+import claudeIcon from "@lobehub/icons-static-svg/icons/claude.svg";
+import geminiIcon from "@lobehub/icons-static-svg/icons/gemini.svg";
+import qwenIcon from "@lobehub/icons-static-svg/icons/qwen.svg";
+import metaIcon from "@lobehub/icons-static-svg/icons/meta.svg";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import {
+  applySessionEvent,
+  groupWorkstreams,
+  isActiveStatus,
+  replaceSessionSource,
+  type AgentSession,
+  type Workstream,
+} from "./core/workstreams";
 import "./styles.css";
-import "./sessions.css";
 
-type Personality = "off" | "subtle" | "playful";
-const faces: Record<AgentStatus, string> = { idle: "-_ -", thinking: "-_-", searching: ">_>", working: "-_-", command: "-_-", editing: "-_-", testing: "-_-", waiting: "?", approval: "?", complete: "^_^", error: "x_x" };
-function useClock() { const [now, setNow] = useState(Date.now()); useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []); return now; }
+const faces: Record<AgentStatus, string> = {
+  idle: "-_-",
+  thinking: "-_-",
+  searching: ">_>",
+  working: "-_-",
+  command: "-_-",
+  editing: "-_-",
+  testing: "-_-",
+  waiting: "?",
+  approval: "?",
+  complete: "^_^",
+  error: "x_x",
+};
+
+const activityLabels: Record<AgentStatus, string> = {
+  idle: "IDLE", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "TOOL",
+  editing: "EDITING", testing: "TESTING", waiting: "WAITING", approval: "APPROVAL", complete: "DONE", error: "ERROR",
+};
+
+function useClock() {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function useViewport() {
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  useEffect(() => {
+    const update = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return viewport;
+}
+
+function isTauri() {
+  return "__TAURI_INTERNALS__" in window;
+}
+
+function compactText(value: string, fallback: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text || fallback;
+}
+
+function commandName(command: string) {
+  const executable = command.trim().split(/\s+/)[0] ?? "";
+  return executable.split("/").pop() ?? executable;
+}
+
+function workstreamElapsed(workstream: Workstream, now: number) {
+  if (workstream.startedAt === null) return 0;
+  return Math.max(0, (workstream.endedAt ?? now) - workstream.startedAt);
+}
+
+function agentElapsed(agent: AgentSession, now: number) {
+  if (agent.state.startedAt === null) return 0;
+  return Math.max(0, (agent.state.endedAt ?? now) - agent.state.startedAt);
+}
+
+function relativeTime(timestamp: number, now: number) {
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1_000));
+  if (seconds < 60) return `${seconds}S AGO`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}M AGO`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}H AGO`;
+  return `${Math.floor(hours / 24)}D AGO`;
+}
+
+function plural(count: number, one: string, many = `${one}S`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function providerIcon(provider: string, model: string) {
+  const identity = `${provider} ${model}`.toLowerCase();
+  if (identity.includes("anthropic") || identity.includes("claude")) return { src: claudeIcon, name: "Claude" };
+  if (identity.includes("openai") || identity.includes("gpt") || identity.includes("o1") || identity.includes("o3")) return { src: openaiIcon, name: "OpenAI" };
+  if (identity.includes("google") || identity.includes("gemini")) return { src: geminiIcon, name: "Google Gemini" };
+  if (identity.includes("qwen") || identity.includes("alibaba")) return { src: qwenIcon, name: "Qwen" };
+  if (identity.includes("meta") || identity.includes("llama")) return { src: metaIcon, name: "Meta" };
+  return null;
+}
+
+function displayModel(model: string) {
+  return model.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ModelIdentity({ agents }: { agents: AgentSession[] }) {
+  const configurations = [...new Map(agents.map((agent) => {
+    const key = `${agent.modelProvider}\u0000${agent.model}\u0000${agent.effort}`;
+    return [key, agent] as const;
+  })).values()];
+  const primary = configurations[0];
+  if (!primary || primary.model === "unknown model") return <span className="model-identity model-unknown"><span className="provider-icons"><i>◇</i></span><small>MODEL UNKNOWN</small></span>;
+  const label = `${displayModel(primary.model)}${primary.effort ? ` · ${primary.effort.toUpperCase()}` : ""}`;
+  const full = configurations.map((agent) => `${displayModel(agent.model)}${agent.effort ? ` · ${agent.effort.toUpperCase()}` : ""}`).join(" + ");
+  return <span className="model-identity" title={full}>
+    <span className="provider-icons">{configurations.slice(0, 3).map((agent) => {
+      const icon = providerIcon(agent.modelProvider, agent.model);
+      return <i key={`${agent.modelProvider}-${agent.model}-${agent.effort}`} aria-label={icon?.name ?? agent.modelProvider}>{icon ? <img src={icon.src} alt="" /> : "◇"}</i>;
+    })}</span>
+    <small>{label}{configurations.length > 1 ? ` +${configurations.length - 1}` : ""}</small>
+  </span>;
+}
+
+function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
+  const seen = new Set<string>();
+  return agent.state.recent.flatMap((event) => {
+    const status = event.status ?? "working";
+    if (event.meta?.activityClass === "telemetry" && status === "thinking" && !event.tool && !event.command) return [];
+    const label = event.label?.toUpperCase() || activityLabels[status];
+    const tool = event.tool || (event.command ? commandName(event.command) : "");
+    const rawDetail = event.detail || event.command || (event.files?.length ? `Updating ${event.files.slice(0, 2).join(", ")}` : "Working");
+    const detail = privacy ? "Agent activity in progress" : compactText(rawDetail, "Working");
+    const target = privacy ? "" : event.target || "";
+    const key = `${label}\u0000${tool}\u0000${detail}\u0000${target}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const narrative = event.meta?.activityClass === "narrative";
+    return [{ id: event.id, status, label, tool, detail, target, narrative }];
+  }).slice(0, limit);
+}
+
+function latestImagePath(agent: AgentSession) {
+  return agent.state.recent.find((event) => event.tool === "view_image" && typeof event.target === "string")?.target ?? "";
+}
+
+function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
+  const [source, setSource] = useState("");
+  const [aspectRatio, setAspectRatio] = useState("16 / 9");
+  useEffect(() => {
+    let disposed = false;
+    setSource("");
+    setAspectRatio("16 / 9");
+    if (!path || privacy || !isTauri()) return;
+    invoke<string>("image_preview", { path }).then((value) => { if (!disposed) setSource(value); }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [path, privacy]);
+  if (!source) return null;
+  const name = path.split(/[\\/]/).pop() || "Visual context";
+  return <figure className="agent-preview">
+    <div className="agent-preview-media" style={{ aspectRatio }}>
+      <img src={source} alt={`Latest image inspected: ${name}`} onLoad={(event) => {
+        const image = event.currentTarget;
+        if (image.naturalWidth && image.naturalHeight) setAspectRatio(`${image.naturalWidth} / ${image.naturalHeight}`);
+      }} onError={() => setSource("")} />
+    </div>
+    <figcaption><span>VIEWING</span><b>{name}</b></figcaption>
+  </figure>;
+}
+
+function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
+  const available = activitySteps(agent, privacy, 80);
+  const narrative = available.filter((step) => step.narrative).slice(0, 2);
+  const telemetry = available.filter((step) => !step.narrative).slice(0, Math.max(1, trailLimit - narrative.length));
+  const steps = [...narrative, ...telemetry];
+  return <li className={`agent-line status-${agent.state.status}`}>
+    {steps.map((step, depth) => <div key={step.id} className={`agent-step ${step.narrative ? "narrative-step" : "telemetry-step"} ${step.tool ? "has-tool" : "no-tool"} status-${step.status} history-depth-${depth}`}>
+      {depth === 0 ? <i className="agent-pulse" aria-hidden="true" /> : <i className="history-mark" aria-hidden="true">·</i>}
+      <span className="agent-number">{depth === 0 ? String(index + 1).padStart(2, "0") : ""}</span>
+      <strong>{step.label}</strong>
+      {step.tool && <span className="agent-tool">· {step.tool}</span>}
+      <span className="agent-detail">{step.detail}</span>
+      {step.target && <span className="agent-target">{step.target}</span>}
+    </div>)}
+  </li>;
+}
+
+function WorkstreamRow({ workstream, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+  const visibleAgents = workstream.agents.slice(0, agentLimit);
+  const extra = workstream.agents.length - visibleAgents.length;
+  const face = faces[workstream.status];
+  const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
+  return <article className={`workstream status-${workstream.status} ${workstream.attention ? "needs-attention" : ""}`}>
+    <div className="workstream-identity">
+      <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
+      <div className="identity-meta">
+        <div className="workstream-dots" aria-label={`${workstream.agents.length} agents`}>
+          {workstream.agents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
+        </div>
+        <ModelIdentity agents={workstream.agents} />
+      </div>
+      <span className="face" aria-hidden="true">{face}</span>
+    </div>
+    <div className="workstream-activity">
+      <h1>{workstream.label}</h1>
+      <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
+      {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
+    </div>
+    <div className="workstream-visual"><time>{formatElapsed(workstreamElapsed(workstream, now))}</time><AgentPreview path={previewPath} privacy={privacy} /></div>
+  </article>;
+}
+
+function CompletionSummary({ agents, now, privacy }: { agents: AgentSession[]; now: number; privacy: boolean }) {
+  const visible = [...agents].sort((a, b) => (b.state.endedAt ?? b.updatedAt) - (a.state.endedAt ?? a.updatedAt)).slice(0, 6);
+  const totalRuntime = agents.reduce((total, agent) => total + agentElapsed(agent, now), 0);
+  return <section className="completion-summary" aria-live="polite">
+    <div className="completion-hero">
+      <div><small>AGENT DEPARTURES</small><h1>ALL DONE</h1><p>{plural(agents.length, "AGENT")} · {formatElapsed(totalRuntime)} COMBINED</p></div>
+      <span aria-hidden="true">^_^</span>
+    </div>
+    <ol>{visible.map((agent) => <li key={agent.id}>
+      <div className="completion-title"><div><h2>{agent.workstreamName}</h2><span>{agent.agentName}</span></div><ModelIdentity agents={[agent]} /></div>
+      <p>{privacy ? "Completed agent activity" : compactText(agent.lastMessage || agent.state.detail, "Agent completed its work")}</p>
+      <div className="completion-meta"><span>RUNTIME {formatElapsed(agentElapsed(agent, now))}</span><time>{relativeTime(agent.state.endedAt ?? agent.updatedAt, now)}</time></div>
+    </li>)}</ol>
+  </section>;
+}
+
 function App() {
-  const [state, setState] = useState<DisplayState>(initialState); const [inspection, setInspection] = useState(false); const [help, setHelp] = useState(false); const [privacy, setPrivacy] = useState(false); const [personality, setPersonality] = useState<Personality>(() => (localStorage.getItem("personality") as Personality) || "subtle"); const [speed, setSpeed] = useState(1); const [playing, setPlaying] = useState(false); const now = useClock();
-  const [sessionStates, setSessionStates] = useState<Record<string, DisplayState>>({}); const [selectedSession, setSelectedSession] = useState<string | null>(null); const selectedSessionRef = useRef<string | null>(null);
-  const apply = (event: AgentEvent) => { const sessionId = typeof event.meta?.sessionId === "string" ? event.meta.sessionId : null; if (!sessionId) { setState((old) => reduceEvent(old, event)); return; } setSessionStates((old) => { const sessionName = typeof event.meta?.sessionName === "string" ? event.meta.sessionName : sessionId.slice(0, 8); const base = old[sessionId] ?? { ...initialState, recent: [], files: [], plan: [], sessionName }; const next = reduceEvent(base, event); if (!selectedSessionRef.current) { selectedSessionRef.current = sessionId; setSelectedSession(sessionId); setState(next); } else if (selectedSessionRef.current === sessionId) setState(next); return { ...old, [sessionId]: next }; }); };
-  useEffect(() => { const sync = () => invoke<unknown[]>("codex_desktop_sessions").then((events) => { if (!Array.isArray(events) || events.length === 0) throw new Error("No Codex desktop sessions found"); events.forEach((payload) => { const normalized = genericJsonlAdapter.ingest(payload); if (normalized) apply(normalized); }); }).catch((error) => apply({ version: 1, id: `desktop-adapter-error-${Date.now()}`, timestamp: new Date().toISOString(), kind: "error", status: "error", label: "ADAPTER ERROR", detail: String(error) })); sync(); const timer = window.setInterval(sync, 1000); const unlisten = listen<unknown>("big-agent:event", (e) => { const normalized = genericJsonlAdapter.ingest(e.payload) ?? codexAdapter.ingest(e.payload); if (normalized) apply(normalized); }); return () => { window.clearInterval(timer); unlisten.then((f) => f()).catch(() => undefined); }; }, []);
-  useEffect(() => { if (!playing) return; let cancelled = false; let index = 0; const play = () => { if (cancelled) return; apply(mockEvent(index)); const delay = mockDelay(index++, speed); window.setTimeout(play, delay); }; play(); return () => { cancelled = true; }; }, [playing, speed]);
-  useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key.toLowerCase() === "f") invoke("toggle_fullscreen").catch(() => document.documentElement.requestFullscreen?.()); if (e.key === "Escape") { invoke("exit_fullscreen").catch(() => document.exitFullscreen?.()); setHelp(false); } if (e.key.toLowerCase() === "i") setInspection((x) => !x); if (e.key.toLowerCase() === "a") invoke("toggle_always_on_top"); if (e.key === "?") setHelp((x) => !x); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, []);
-  useEffect(() => localStorage.setItem("personality", personality), [personality]);
-  const fileLines = privacy ? [] : state.files.slice(0, 4); const detail = privacy && state.detail ? "Agent activity in progress" : state.detail;
-  const tinyFace = personality === "off" ? "" : personality === "playful" && state.status === "working" && elapsedMs(state, now) > 25 * 60_000 ? "..." : faces[state.status];
-  const beginDrag = (event: React.MouseEvent<HTMLElement>) => { if ((event.target as HTMLElement).closest("button, select")) return; getCurrentWindow().startDragging().catch(() => undefined); };
-  const selectSession = (id: string) => { const next = sessionStates[id]; if (!next) return; selectedSessionRef.current = id; setSelectedSession(id); setState(next); };
-  return <main className={`app status-${state.status} ${state.attention ? "needs-attention" : ""}`}>
-    <header data-tauri-drag-region onMouseDown={beginDrag}><div className="identity" data-tauri-drag-region><b>BIG AGENT</b><span>{state.project}</span><span>{state.branch}</span></div><div className="top-actions"><button onClick={() => setInspection(!inspection)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button><i className="status-dot" title={state.status} /></div></header>
-    {Object.keys(sessionStates).length > 1 && <nav className="session-switcher" aria-label="Active Codex sessions">{Object.entries(sessionStates).map(([id, session], index) => <button key={id} className={selectedSession === id ? "selected" : ""} onClick={() => selectSession(id)}><i className={`mini-dot mini-${session.status}`} /><span>{index + 1}</span><small>{session.sessionName}</small></button>)}</nav>}
-    <section className="ambient" aria-live="polite"><div className="headline">{state.label}</div><div className={`detail ${fileLines.length ? "files" : ""}`}>{fileLines.length ? fileLines.map((file) => <span key={file}>{file}</span>) : detail.split("\n").map((line, i) => <span key={i}>{line}</span>)}</div>{state.startedAt && <time>{formatElapsed(elapsedMs(state, now))}</time>}<div className="face">{tinyFace}</div></section>
-    <footer><span>{state.sessionName}</span><div className="controls"><button onClick={() => setPrivacy(!privacy)}>{privacy ? "PRIVATE" : "OPEN"}</button><button onClick={() => { setPlaying(!playing); if (!playing) apply(mockEvent(0)); }}>{playing ? "STOP DEMO" : "PLAY DEMO"}</button><select aria-label="Personality" value={personality} onChange={(e) => setPersonality(e.target.value as Personality)}><option value="off">Face off</option><option value="subtle">Face subtle</option><option value="playful">Face playful</option></select></div></footer>
-    {inspection && <aside className="inspection"><div><h2>ACTIVITY</h2><p className="quiet">{state.status} · {formatElapsed(elapsedMs(state, now))}</p></div>{state.plan.length > 0 && <section><h3>PLAN</h3>{state.plan.map((p) => <p key={p}>{p}</p>)}</section>}<section><h3>RECENT</h3>{state.recent.slice(0, 12).map((event) => <article key={event.id}><b>{event.kind.replace(".", " ")}</b><span>{privacy ? "Activity hidden" : event.detail || event.command || event.label || event.status}</span></article>)}</section><div className="inspect-controls"><button onClick={() => setSpeed(speed === 1 ? 4 : 1)}>Demo {speed}×</button><button onClick={() => setState(initialState)}>Clear</button></div></aside>}
+  const [sessions, setSessions] = useState<Record<string, AgentSession>>({});
+  const [inspection, setInspection] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [privacy, setPrivacy] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const now = useClock();
+  const viewport = useViewport();
+  const workstreams = useMemo(() => groupWorkstreams(sessions, now, Number.POSITIVE_INFINITY), [sessions, now]);
+  const activeAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => isActiveStatus(agent.state.status));
+  const isLiveAgent = (agent: AgentSession) => isActiveStatus(agent.state.status);
+  const liveWorkstreams = workstreams.filter((workstream) => workstream.agents.some(isLiveAgent));
+  const liveAgents = workstreams.flatMap((workstream) => workstream.agents).filter(isLiveAgent);
+  const attentionCount = liveAgents.filter((agent) => agent.state.attention).length;
+  const completedAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => agent.state.status === "complete");
+  const recentlyDone = workstreams.filter((workstream) => workstream.status === "complete" && now - (workstream.endedAt ?? workstream.updatedAt) <= 20_000).length;
+  const boardWorkstreams = liveWorkstreams.length ? workstreams.flatMap((workstream) => {
+    const live = workstream.agents.filter(isLiveAgent);
+    if (live.length) return [{ ...workstream, agents: live }];
+    return workstream.status === "complete" && now - (workstream.endedAt ?? workstream.updatedAt) <= 20_000 ? [workstream] : [];
+  }) : [];
+  const rowBudget = (viewport.height - Math.max(76, viewport.height * .14)) / Math.max(1, boardWorkstreams.length);
+  const trailLimit = rowBudget >= 300 ? 5 : rowBudget >= 235 ? 4 : rowBudget >= 175 ? 3 : rowBudget >= 125 ? 2 : 1;
+  const agentLimit = viewport.width < 700 ? 1 : rowBudget >= 300 ? 4 : rowBudget >= 220 ? 3 : rowBudget >= 155 ? 2 : 1;
+
+  const apply = (event: AgentEvent, source = "protocol") => setSessions((old) => applySessionEvent(old, event, Date.now(), source));
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let stopSnapshots: (() => void) | undefined;
+    let stopProtocol: (() => void) | undefined;
+    const replaceSnapshot = (payloads: unknown[]) => {
+      if (disposed || !Array.isArray(payloads)) return;
+      const events = payloads.map((payload) => genericJsonlAdapter.ingest(payload)).filter((event): event is AgentEvent => event !== null);
+      setSessions((old) => replaceSessionSource(old, "codex-desktop", events));
+      setSyncError("");
+    };
+    const connect = async () => {
+      try {
+        stopSnapshots = await listen<unknown[]>("big-agent:sessions", (message) => replaceSnapshot(message.payload));
+        stopProtocol = await listen<unknown>("big-agent:event", (message) => {
+          const event = genericJsonlAdapter.ingest(message.payload) ?? codexAdapter.ingest(message.payload);
+          if (event) apply(event, "protocol");
+        });
+        const payloads = await invoke<unknown[]>("codex_desktop_sessions");
+        replaceSnapshot(payloads);
+      } catch (error) {
+        if (!disposed) setSyncError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    connect();
+    return () => {
+      disposed = true;
+      stopSnapshots?.();
+      stopProtocol?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke("set_screen_awake", { active: liveAgents.length > 0 }).catch(() => undefined);
+  }, [liveAgents.length]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === "f") invoke("toggle_fullscreen").catch(() => document.documentElement.requestFullscreen?.());
+      if (event.key === "Escape") { invoke("exit_fullscreen").catch(() => document.exitFullscreen?.()); setHelp(false); }
+      if (event.key.toLowerCase() === "i") setInspection((value) => !value);
+      if (event.key.toLowerCase() === "a") invoke("toggle_always_on_top").catch(() => undefined);
+      if (event.key === "?") setHelp((value) => !value);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const beginDrag = (event: React.MouseEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest("button, select")) return;
+    if (isTauri()) getCurrentWindow().startDragging().catch(() => undefined);
+  };
+
+  const summary = liveWorkstreams.length > 0
+    ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.length, "AGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
+    : completedAgents.length > 0
+      ? `${plural(completedAgents.length, "AGENT")} COMPLETED · LAST ${relativeTime(Math.max(...completedAgents.map((agent) => agent.state.endedAt ?? agent.updatedAt)), now)}`
+      : "WAITING FOR AN AGENT";
+
+  return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${attentionCount ? "has-attention" : ""}`}>
+    <header data-tauri-drag-region onMouseDown={beginDrag}>
+      <div className="brand" data-tauri-drag-region><span className="brand-face">-_</span><b>BIG AGENT</b></div>
+      <div className="summary" data-tauri-drag-region>{summary}</div>
+      <button onClick={() => setInspection((value) => !value)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
+    </header>
+
+    {boardWorkstreams.length > 0
+      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      : completedAgents.length > 0
+        ? <CompletionSummary agents={completedAgents} now={now} privacy={privacy} />
+      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><span>-_-</span></section>}
+
+    <footer>
+      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : boardWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>
+      <div className="controls">
+        <button onClick={() => setPrivacy((value) => !value)}>{privacy ? "PRIVATE" : "OPEN"}</button>
+      </div>
+    </footer>
+
+    {inspection && <aside className="inspection">
+      <div><h2>ACTIVITY</h2><p className="quiet">{plural(workstreams.length, "WORKSTREAM")} · {plural(activeAgents.length, "ACTIVE AGENT")}</p></div>
+      {workstreams.map((workstream) => <section key={workstream.id}><h3>{workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{agent.state.label}</b><span>{privacy ? "Activity hidden" : agent.state.detail || agent.state.command || agent.state.status}</span></article>)}</section>)}
+      {workstreams.length === 0 && <p className="quiet">No live activity.</p>}
+    </aside>}
+
     {help && <div className="help" role="dialog"><button onClick={() => setHelp(false)}>×</button><h2>SHORTCUTS</h2><p><kbd>F</kbd> fullscreen <kbd>Esc</kbd> exit</p><p><kbd>I</kbd> inspection <kbd>A</kbd> always on top</p><p><kbd>?</kbd> this guide</p></div>}
   </main>;
 }
+
 createRoot(document.getElementById("root")!).render(<App />);

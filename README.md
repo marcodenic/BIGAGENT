@@ -1,8 +1,10 @@
 # BIG AGENT
 
-An ambient, room-scale status display for autonomous coding agents. BIG AGENT is a native Tauri desktop application: one enormous sentence for the current activity, a timer, a permanent status dot, and a tiny optional ASCII companion.
+An ambient, room-scale status display for autonomous coding agents. BIG AGENT is a native Tauri desktop application: stable workstream rows, enormous overall states, live per-agent activity, timers, permanent status dots, and tiny optional ASCII companions.
 
-It is intentionally not an IDE, terminal, or dashboard. The default display is designed to read from across a room; press `I` for the secondary inspection view.
+While agents are running, BIG AGENT asks the operating system to keep the display awake. The wake lock is released as soon as all agents complete or stop, and whenever the app exits.
+
+It is intentionally not an IDE, terminal, or dashboard. The default display groups related sessions into workstreams and is designed to read from across a room; press `I` for the secondary inspection view.
 
 ## Run locally
 
@@ -13,19 +15,17 @@ pnpm install
 pnpm tauri dev
 ```
 
-Click **PLAY DEMO** to run the complete mock coding session (idle, thinking, searching, editing, commands, tests, failure, approval, recovery, completion). Open inspection with `I`; change demo speed there.
-
 Create distributable platform packages with `pnpm tauri build`. Tauri's bundler produces the appropriate installers for the host platform; build separately on macOS, Windows, and Linux for all three targets.
 
 ## Controls
 
-`F` fullscreen · `Esc` exit fullscreen · `I` inspection · `A` always on top · `?` shortcuts. Hover the footer for demo, privacy, and personality controls. The default **Subtle** face can be disabled or made Playful. Privacy mode hides file names, commands, paths, and detailed labels.
+`F` fullscreen · `Esc` exit fullscreen · `I` inspection · `A` always on top · `?` shortcuts. Hover the footer for the privacy control. Privacy mode hides file names, commands, paths, and detailed labels. ASCII faces change automatically with agent status.
 
 ## Connect an agent
 
 BIG AGENT is agent-neutral. Adapters translate structured agent activity into the versioned BIG AGENT protocol, then the deterministic reducer creates UI state. Agent-specific parsing never occurs in React components.
 
-When running beside Codex desktop, BIG AGENT reads the app's local structured thread ledger and tracks every active turn independently. Use the numbered session switcher at the top of the display to move between simultaneous tasks; amber and red session dots remain visible when another task needs attention.
+When running beside Codex desktop, BIG AGENT reads the app's local structured thread ledger and groups turns from the same task into one stable workstream. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished turns remain visible briefly, then age out automatically; amber and red states remain conspicuous without moving rows around.
 
 With BIG AGENT running, send a simple event:
 

@@ -1,1 +1,1 @@
-{}
+{"main-window":{"identifier":"main-window","description":"Permissions required by the BIG AGENT status window.","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:window:allow-start-dragging"]}}
