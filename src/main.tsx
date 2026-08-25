@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { MatrixFace } from "./components/MatrixFace";
+import { FaceVisual } from "./components/FaceVisual";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
 import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
@@ -67,6 +67,22 @@ function useClock() {
   return now;
 }
 
+function useDeadlineClock(deadline: number) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const current = Date.now();
+    setNow(current);
+    if (deadline <= current) return;
+    const timer = window.setInterval(() => {
+      const next = Date.now();
+      setNow(next);
+      if (next >= deadline) window.clearInterval(timer);
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  return now;
+}
+
 function useViewport() {
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   useEffect(() => {
@@ -79,6 +95,16 @@ function useViewport() {
 
 function isTauri() {
   return "__TAURI_INTERNALS__" in window;
+}
+
+async function toggleAppFullscreen() {
+  if (isTauri()) {
+    const appWindow = getCurrentWindow();
+    await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
+    return;
+  }
+  if (document.fullscreenElement) await document.exitFullscreen();
+  else await document.documentElement.requestFullscreen();
 }
 
 function compactText(value: string, fallback: string) {
@@ -239,7 +265,23 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
   </li>;
 }
 
-function WorkstreamRow({ workstream, personality, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+function WorkstreamElapsed({ workstream }: { workstream: Workstream }) {
+  const now = useClock();
+  return <time>{formatElapsed(workstreamElapsed(workstream, now))}</time>;
+}
+
+function RelativeTimestamp({ timestamp }: { timestamp: number }) {
+  const now = useClock();
+  return <time>{relativeTime(timestamp, now)}</time>;
+}
+
+function CompletedHeaderSummary({ agents }: { agents: AgentSession[] }) {
+  const now = useClock();
+  const last = Math.max(...agents.map((agent) => agent.state.endedAt ?? agent.updatedAt));
+  return <>{plural(agents.length, "AGENT")} COMPLETED · LAST {relativeTime(last, now)}</>;
+}
+
+function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
@@ -253,28 +295,28 @@ function WorkstreamRow({ workstream, personality, now, privacy, agentLimit, trai
         <ModelIdentity agents={workstream.agents} />
       </div>
     </div>
-    <MatrixFace status={workstream.status} label={workstream.label} now={now} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
+    <FaceVisual status={workstream.status} label={workstream.label} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
     <div className="workstream-activity">
       <h1>{workstream.label}</h1>
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
       {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
     </div>
-    <div className="workstream-visual"><time>{formatElapsed(workstreamElapsed(workstream, now))}</time><AgentPreview path={previewPath} privacy={privacy} /></div>
+    <div className="workstream-visual"><WorkstreamElapsed workstream={workstream} /><AgentPreview path={previewPath} privacy={privacy} /></div>
   </article>;
 }
 
-function CompletionSummary({ agents, now, privacy }: { agents: AgentSession[]; now: number; privacy: boolean }) {
+function CompletionSummary({ agents, privacy }: { agents: AgentSession[]; privacy: boolean }) {
   const visible = [...agents].sort((a, b) => (b.state.endedAt ?? b.updatedAt) - (a.state.endedAt ?? a.updatedAt)).slice(0, 6);
-  const totalRuntime = agents.reduce((total, agent) => total + agentElapsed(agent, now), 0);
+  const totalRuntime = agents.reduce((total, agent) => total + agentElapsed(agent, agent.state.endedAt ?? agent.updatedAt), 0);
   return <section className="completion-summary" aria-live="polite">
     <div className="completion-hero">
       <div><small>AGENT DEPARTURES</small><h1>ALL DONE</h1><p>{plural(agents.length, "AGENT")} · {formatElapsed(totalRuntime)} COMBINED</p></div>
-      <div className="completion-face"><MatrixFace status="complete" label="DONE" now={now} seed={faceHash(agents.map((agent) => agent.id).join("|"))} personality={agents.length % 8} attention={false} /></div>
+      <div className="completion-face"><FaceVisual status="complete" label="DONE" seed={faceHash(agents.map((agent) => agent.id).join("|"))} personality={agents.length % 8} attention={false} /></div>
     </div>
     <ol>{visible.map((agent) => <li key={agent.id}>
       <div className="completion-title"><div><h2>{agent.workstreamName}</h2><span>{agent.agentName}</span></div><ModelIdentity agents={[agent]} /></div>
       <p>{privacy ? "Completed agent activity" : compactText(agent.lastMessage || agent.state.detail, "Agent completed its work")}</p>
-      <div className="completion-meta"><span>RUNTIME {formatElapsed(agentElapsed(agent, now))}</span><time>{relativeTime(agent.state.endedAt ?? agent.updatedAt, now)}</time></div>
+      <div className="completion-meta"><span>RUNTIME {formatElapsed(agentElapsed(agent, agent.state.endedAt ?? agent.updatedAt))}</span><RelativeTimestamp timestamp={agent.state.endedAt ?? agent.updatedAt} /></div>
     </li>)}</ol>
   </section>;
 }
@@ -285,20 +327,23 @@ function App() {
   const [help, setHelp] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const now = useClock();
   const viewport = useViewport();
-  const workstreams = useMemo(() => groupWorkstreams(sessions, now, Number.POSITIVE_INFINITY), [sessions, now]);
+  const workstreams = useMemo(() => groupWorkstreams(sessions, Date.now(), Number.POSITIVE_INFINITY), [sessions]);
   const activeAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => isActiveStatus(agent.state.status));
   const isLiveAgent = (agent: AgentSession) => isActiveStatus(agent.state.status);
   const liveWorkstreams = workstreams.filter((workstream) => workstream.agents.some(isLiveAgent));
   const liveAgents = workstreams.flatMap((workstream) => workstream.agents).filter(isLiveAgent);
   const attentionCount = liveAgents.filter((agent) => agent.state.attention).length;
   const completedAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => agent.state.status === "complete");
-  const recentlyDone = workstreams.filter((workstream) => workstream.status === "complete" && now - (workstream.endedAt ?? workstream.updatedAt) <= 20_000).length;
+  const recentDeadline = Math.max(0, ...workstreams
+    .filter((workstream) => workstream.status === "complete")
+    .map((workstream) => (workstream.endedAt ?? workstream.updatedAt) + 20_000));
+  const recentNow = useDeadlineClock(recentDeadline);
+  const recentlyDone = workstreams.filter((workstream) => workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000).length;
   const boardWorkstreams = liveWorkstreams.length ? workstreams.flatMap((workstream) => {
     const live = workstream.agents.filter(isLiveAgent);
     if (live.length) return [{ ...workstream, agents: live }];
-    return workstream.status === "complete" && now - (workstream.endedAt ?? workstream.updatedAt) <= 20_000 ? [workstream] : [];
+    return workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000 ? [workstream] : [];
   }) : [];
   const rowBudget = (viewport.height - Math.max(76, viewport.height * .14)) / Math.max(1, boardWorkstreams.length);
   const trailLimit = rowBudget >= 300 ? 5 : rowBudget >= 235 ? 4 : rowBudget >= 175 ? 3 : rowBudget >= 125 ? 2 : 1;
@@ -345,7 +390,7 @@ function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === "f") invoke("toggle_fullscreen").catch(() => document.documentElement.requestFullscreen?.());
+      if (event.key.toLowerCase() === "f") toggleAppFullscreen().catch(() => undefined);
       if (event.key === "Escape") { invoke("exit_fullscreen").catch(() => document.exitFullscreen?.()); setHelp(false); }
       if (event.key.toLowerCase() === "i") setInspection((value) => !value);
       if (event.key === "?") setHelp((value) => !value);
@@ -362,7 +407,7 @@ function App() {
   const summary = liveWorkstreams.length > 0
     ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.length, "AGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
     : completedAgents.length > 0
-      ? `${plural(completedAgents.length, "AGENT")} COMPLETED · LAST ${relativeTime(Math.max(...completedAgents.map((agent) => agent.state.endedAt ?? agent.updatedAt)), now)}`
+      ? <CompletedHeaderSummary agents={completedAgents} />
       : "WAITING FOR AN AGENT";
   const workstreamPersonalities = personalitiesForWorkstreams(boardWorkstreams);
 
@@ -370,14 +415,17 @@ function App() {
     <header data-tauri-drag-region onMouseDown={beginDrag}>
       <div className="brand" data-tauri-drag-region><span className="brand-face">-_</span><b>BIG AGENT</b></div>
       <div className="summary" data-tauri-drag-region>{summary}</div>
-      <button onClick={() => setInspection((value) => !value)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
+      <div className="header-actions">
+        <button className="fullscreen-toggle" onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Toggle fullscreen (F)">⛶</button>
+        <button onClick={() => setInspection((value) => !value)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
+      </div>
     </header>
 
     {boardWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={workstreamPersonalities.get(workstream.id) ?? 0} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={workstreamPersonalities.get(workstream.id) ?? 0} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : completedAgents.length > 0
-        ? <CompletionSummary agents={completedAgents} now={now} privacy={privacy} />
-      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><MatrixFace status="idle" label="READY" now={now} seed={41} personality={3} attention={false} /></div></section>}
+        ? <CompletionSummary agents={completedAgents} privacy={privacy} />
+      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><FaceVisual status="idle" label="READY" seed={41} personality={3} attention={false} /></div></section>}
 
     <footer>
       <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : boardWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>

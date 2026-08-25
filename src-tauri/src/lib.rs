@@ -57,6 +57,27 @@ fn codex_home() -> String {
 fn codex_db_path() -> String { format!("{}/thread_history_1.sqlite", codex_home()) }
 fn codex_state_db_path() -> String { format!("{}/state_5.sqlite", codex_home()) }
 
+fn source_stamp(path: &str) -> (u64, u128) {
+  let Ok(metadata) = fs::metadata(path) else { return (0, 0) };
+  let modified = metadata.modified().ok()
+    .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|value| value.as_nanos())
+    .unwrap_or(0);
+  (metadata.len(), modified)
+}
+
+fn codex_source_signature() -> Vec<(u64, u128)> {
+  let history = codex_db_path();
+  let state = codex_state_db_path();
+  [
+    history.clone(),
+    format!("{history}-wal"),
+    state.clone(),
+    format!("{state}-wal"),
+    format!("{}/session_index.jsonl", codex_home()),
+  ].iter().map(|path| source_stamp(path)).collect()
+}
+
 fn thread_names() -> HashMap<String, String> {
   let Ok(file) = File::open(format!("{}/session_index.jsonl", codex_home())) else { return HashMap::new() };
   BufReader::new(file).lines().map_while(Result::ok).filter_map(|line| {
@@ -273,11 +294,25 @@ fn codex_desktop_sessions() -> Result<Vec<Value>, String> {
 /// Poll from native code so live status continues while WebKit throttles an
 /// unfocused or backgrounded window. The webview only renders pushed snapshots.
 fn start_codex_session_watcher(app: AppHandle) {
-  std::thread::spawn(move || loop {
-    if let Ok(sessions) = codex_desktop_sessions() {
-      let _ = app.emit("big-agent:sessions", sessions);
+  std::thread::spawn(move || {
+    let mut previous: Option<Vec<Value>> = None;
+    let mut previous_signature: Option<Vec<(u64, u128)>> = None;
+    let mut safety_refresh = std::time::Instant::now();
+    loop {
+      let signature = codex_source_signature();
+      let now = std::time::Instant::now();
+      if previous_signature.as_ref() != Some(&signature) || now >= safety_refresh {
+        if let Ok(sessions) = codex_desktop_sessions() {
+          if previous.as_ref() != Some(&sessions) {
+            let _ = app.emit("big-agent:sessions", &sessions);
+            previous = Some(sessions);
+          }
+          previous_signature = Some(signature);
+          safety_refresh = now + std::time::Duration::from_secs(15);
+        }
+      }
+      std::thread::sleep(std::time::Duration::from_millis(250));
     }
-    std::thread::sleep(std::time::Duration::from_millis(750));
   });
 }
 
