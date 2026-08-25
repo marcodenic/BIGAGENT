@@ -244,8 +244,8 @@ function WorkstreamRow({ workstream, now, privacy, agentLimit, trailLimit }: { w
         </div>
         <ModelIdentity agents={workstream.agents} />
       </div>
-      <span className="face" aria-hidden="true">{face}</span>
     </div>
+    <span className="face" aria-hidden="true">{face}</span>
     <div className="workstream-activity">
       <h1>{workstream.label}</h1>
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
@@ -340,7 +340,6 @@ function App() {
       if (event.key.toLowerCase() === "f") invoke("toggle_fullscreen").catch(() => document.documentElement.requestFullscreen?.());
       if (event.key === "Escape") { invoke("exit_fullscreen").catch(() => document.exitFullscreen?.()); setHelp(false); }
       if (event.key.toLowerCase() === "i") setInspection((value) => !value);
-      if (event.key.toLowerCase() === "a") invoke("toggle_always_on_top").catch(() => undefined);
       if (event.key === "?") setHelp((value) => !value);
     };
     window.addEventListener("keydown", onKey);
@@ -384,7 +383,7 @@ function App() {
       {workstreams.length === 0 && <p className="quiet">No live activity.</p>}
     </aside>}
 
-    {help && <div className="help" role="dialog"><button onClick={() => setHelp(false)}>×</button><h2>SHORTCUTS</h2><p><kbd>F</kbd> fullscreen <kbd>Esc</kbd> exit</p><p><kbd>I</kbd> inspection <kbd>A</kbd> always on top</p><p><kbd>?</kbd> this guide</p></div>}
+    {help && <div className="help" role="dialog"><button onClick={() => setHelp(false)}>×</button><h2>SHORTCUTS</h2><p><kbd>F</kbd> fullscreen <kbd>Esc</kbd> exit</p><p><kbd>I</kbd> inspection</p><p><kbd>?</kbd> this guide</p></div>}
   </main>;
 }
 

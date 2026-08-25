@@ -2,7 +2,7 @@ use serde_json::Value;
 use rusqlite::{params, Connection, OpenFlags};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{collections::HashMap, fs::{self, File}, io::{BufRead, BufReader, Read, Write}, net::TcpListener, path::{Path, PathBuf}, process::{Command, Stdio}, sync::{Mutex, OnceLock}};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 #[derive(Default)]
 struct WakeLockState(Mutex<Option<screen_wake_lock::ScreenWakeLock>>);
@@ -13,9 +13,6 @@ fn emit(app: &AppHandle, value: Value) { let _ = app.emit("big-agent:event", val
 fn toggle_fullscreen(app: AppHandle) -> Result<(), String> { let w = app.get_webview_window("main").ok_or("main window unavailable")?; let next = !w.is_fullscreen().map_err(|e| e.to_string())?; w.set_fullscreen(next).map_err(|e| e.to_string()) }
 #[tauri::command]
 fn exit_fullscreen(app: AppHandle) -> Result<(), String> { app.get_webview_window("main").ok_or("main window unavailable")?.set_fullscreen(false).map_err(|e| e.to_string()) }
-#[tauri::command]
-fn toggle_always_on_top(app: AppHandle) -> Result<(), String> { let w = app.get_webview_window("main").ok_or("main window unavailable")?; let next = !w.is_always_on_top().map_err(|e| e.to_string())?; w.set_always_on_top(next).map_err(|e| e.to_string()) }
-
 #[tauri::command]
 fn set_screen_awake(active: bool, state: State<'_, WakeLockState>) -> Result<(), String> {
   let mut wake_lock = state.0.lock().map_err(|_| "screen wake lock state unavailable".to_string())?;
@@ -300,7 +297,31 @@ fn start_protocol_server(app: AppHandle) {
   });
 }
 
-pub fn run() { tauri::Builder::default().manage(WakeLockState::default()).setup(|app| { start_protocol_server(app.handle().clone()); start_codex_session_watcher(app.handle().clone()); Ok(()) }).plugin(tauri_plugin_opener::init()).invoke_handler(tauri::generate_handler![toggle_fullscreen, exit_fullscreen, toggle_always_on_top, set_screen_awake, image_preview, run_process, codex_desktop_snapshot, codex_desktop_sessions]).run(tauri::generate_context!()).expect("error while running BIG AGENT"); }
+pub fn run() {
+  tauri::Builder::default()
+    .manage(WakeLockState::default())
+    .setup(|app| {
+      start_protocol_server(app.handle().clone());
+      start_codex_session_watcher(app.handle().clone());
+      if let Some(window) = app.get_webview_window("main") {
+        let maximized = window.is_maximized().unwrap_or(false);
+        let _ = window.set_always_on_top(maximized);
+      }
+      Ok(())
+    })
+    .on_window_event(|window, event| {
+      if matches!(event, WindowEvent::Resized(_)) {
+        let maximized = window.is_maximized().unwrap_or(false);
+        if window.is_always_on_top().ok() != Some(maximized) {
+          let _ = window.set_always_on_top(maximized);
+        }
+      }
+    })
+    .plugin(tauri_plugin_opener::init())
+    .invoke_handler(tauri::generate_handler![toggle_fullscreen, exit_fullscreen, set_screen_awake, image_preview, run_process, codex_desktop_snapshot, codex_desktop_sessions])
+    .run(tauri::generate_context!())
+    .expect("error while running BIG AGENT");
+}
 
 #[cfg(test)]
 mod tests {
