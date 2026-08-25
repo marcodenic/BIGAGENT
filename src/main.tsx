@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { MatrixFace } from "./components/MatrixFace";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
 import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
@@ -23,20 +24,6 @@ import {
 } from "./core/workstreams";
 import "./styles.css";
 
-const faces: Record<AgentStatus, string[]> = {
-  idle: ["-_-", "._.", "u_u", "-.-", "=_="],
-  thinking: ["o_O", "O_o", "O_O", "o_o", "._.", "-_-", "@_@", "9_9"],
-  searching: [">_>", "<_<", ">_<", "o_O", "O_o", "0_0", "._>", "<_."],
-  working: ["o_o", "O_O", "o_O", "O_o", "._.", "-_-", "^_^", "u_u"],
-  command: [">_>", "<_<", "o_o", "O_o", "._.", "-_-", "=_="],
-  editing: ["._.", "o_o", "o_O", "O_o", "-_-", "^_^", "u_u", "=_="],
-  testing: ["?_?", "o_O", "O_o", "O_O", "0_0", ">_<", "@_@", "-_-"],
-  waiting: ["._.", "-_-", "u_u", "-.-", "=_=", "T_T", "o_o"],
-  approval: ["?_?", "O_O", "o_O", "O_o", "!_!", "0_0", "@_@"],
-  complete: ["^_^", "^o^", "n_n", "u_u", "=_=", "^.^"],
-  error: ["x_x", "X_X", "T_T", ">_<", "@_@", "!_!", ";_;"],
-};
-
 function faceHash(value: string) {
   let hash = 2166136261;
   for (const character of value) {
@@ -46,25 +33,22 @@ function faceHash(value: string) {
   return hash >>> 0;
 }
 
-function facesForWorkstreams(workstreams: Workstream[], now: number) {
-  const assigned = new Map<string, string>();
-  const visible = new Set<string>();
+function personalitiesForWorkstreams(workstreams: Workstream[]) {
+  const assigned = new Map<string, number>();
+  const visible = new Set<number>();
   for (const workstream of workstreams) {
-    const variants = faces[workstream.status];
     const hash = faceHash(workstream.id);
-    const cadence = workstream.attention ? 2_700 + hash % 900 : 5_200 + hash % 2_400;
-    const phase = Math.floor((now + hash % 11_000) / cadence);
-    const start = (hash + phase) % variants.length;
-    let expression = variants[start];
-    for (let step = 0; step < variants.length; step += 1) {
-      const candidate = variants[(start + step) % variants.length];
+    const start = hash % 8;
+    let personality = start;
+    for (let step = 0; step < 8; step += 1) {
+      const candidate = (start + step) % 8;
       if (!visible.has(candidate)) {
-        expression = candidate;
+        personality = candidate;
         break;
       }
     }
-    visible.add(expression);
-    assigned.set(workstream.id, expression);
+    visible.add(personality);
+    assigned.set(workstream.id, personality);
   }
   return assigned;
 }
@@ -255,7 +239,7 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
   </li>;
 }
 
-function WorkstreamRow({ workstream, face, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; face: string; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+function WorkstreamRow({ workstream, personality, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
@@ -269,7 +253,7 @@ function WorkstreamRow({ workstream, face, now, privacy, agentLimit, trailLimit 
         <ModelIdentity agents={workstream.agents} />
       </div>
     </div>
-    <span className="face" aria-hidden="true">{face}</span>
+    <MatrixFace status={workstream.status} label={workstream.label} now={now} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
     <div className="workstream-activity">
       <h1>{workstream.label}</h1>
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
@@ -285,7 +269,7 @@ function CompletionSummary({ agents, now, privacy }: { agents: AgentSession[]; n
   return <section className="completion-summary" aria-live="polite">
     <div className="completion-hero">
       <div><small>AGENT DEPARTURES</small><h1>ALL DONE</h1><p>{plural(agents.length, "AGENT")} · {formatElapsed(totalRuntime)} COMBINED</p></div>
-      <span aria-hidden="true">^_^</span>
+      <div className="completion-face"><MatrixFace status="complete" label="DONE" now={now} seed={faceHash(agents.map((agent) => agent.id).join("|"))} personality={agents.length % 8} attention={false} /></div>
     </div>
     <ol>{visible.map((agent) => <li key={agent.id}>
       <div className="completion-title"><div><h2>{agent.workstreamName}</h2><span>{agent.agentName}</span></div><ModelIdentity agents={[agent]} /></div>
@@ -380,7 +364,7 @@ function App() {
     : completedAgents.length > 0
       ? `${plural(completedAgents.length, "AGENT")} COMPLETED · LAST ${relativeTime(Math.max(...completedAgents.map((agent) => agent.state.endedAt ?? agent.updatedAt)), now)}`
       : "WAITING FOR AN AGENT";
-  const workstreamFaces = facesForWorkstreams(boardWorkstreams, now);
+  const workstreamPersonalities = personalitiesForWorkstreams(boardWorkstreams);
 
   return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header data-tauri-drag-region onMouseDown={beginDrag}>
@@ -390,10 +374,10 @@ function App() {
     </header>
 
     {boardWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} face={workstreamFaces.get(workstream.id) ?? "-_-"} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={workstreamPersonalities.get(workstream.id) ?? 0} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : completedAgents.length > 0
         ? <CompletionSummary agents={completedAgents} now={now} privacy={privacy} />
-      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><span>-_-</span></section>}
+      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><MatrixFace status="idle" label="READY" now={now} seed={41} personality={3} attention={false} /></div></section>}
 
     <footer>
       <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : boardWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>

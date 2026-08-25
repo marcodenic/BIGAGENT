@@ -53,6 +53,25 @@ describe("workstream projection", () => {
     expect(sessions["01"].state.recent.map((item) => item.id)).toEqual(["step-2", "step-1"]);
   });
 
+  it("starts a resumed session with a fresh display history", () => {
+    const previousRun = normalizeSimpleEvent({
+      status: "complete",
+      detail: "Previous work finished",
+      meta: { sessionId: "01", threadId: "project", turnId: "old-turn", lastMessage: "The old final response" },
+    }, "old-final");
+    const resumedRun = normalizeSimpleEvent({
+      status: "thinking",
+      detail: "New request received",
+      meta: { sessionId: "01", threadId: "project", turnId: "new-turn" },
+    }, "new-start");
+    let sessions = replaceSessionSource({}, "codex", [previousRun], 1_000);
+    sessions = replaceSessionSource(sessions, "codex", [resumedRun], 2_000);
+    expect(sessions["01"].runId).toBe("new-turn");
+    expect(sessions["01"].lastMessage).toBe("");
+    expect(sessions["01"].state.detail).toBe("New request received");
+    expect(sessions["01"].state.recent.map((item) => item.id)).toEqual(["new-start"]);
+  });
+
   it("does not resurrect a terminal session when older history is backfilled", () => {
     const older = normalizeSimpleEvent({ status: "thinking", detail: "Earlier planning", meta: { sessionId: "01", threadId: "project" } }, "older");
     const done = normalizeSimpleEvent({ status: "complete", detail: "Finished", meta: { sessionId: "01", threadId: "project" } }, "final");

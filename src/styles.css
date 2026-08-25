@@ -149,33 +149,45 @@ header button:hover { color: #efeee9; }
 .needs-attention .state-dot.status-waiting, .needs-attention .state-dot.status-approval { animation: urgent 1.25s ease-in-out infinite; }
 
 .workstream-activity { min-width: 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
-.face {
+.matrix-face {
   position: absolute;
   z-index: 1;
-  left: 0;
+  left: calc(var(--identity-width) / 2);
   top: 61%;
-  transform: translateY(-50%);
-  width: var(--identity-width);
+  transform: translate(-50%, -50%);
+  width: min(calc(var(--identity-width) * .9), 265px);
+  height: auto;
   overflow: visible;
-  text-align: center;
-  white-space: nowrap;
-  font: 300 clamp(58px, 6vw, 108px)/1 "Geist Mono Variable", monospace;
-  letter-spacing: -.12em;
-  color: #85887f;
-  opacity: .66;
-  text-shadow: 0 0 20px #d8d8cf12;
-  animation: face-breathe 4.8s ease-in-out infinite;
+  opacity: .88;
+  animation: matrix-breathe 5.6s ease-in-out infinite;
 }
+.matrix-light {
+  fill: #cfd1c8;
+  opacity: 0;
+  transition: opacity .46s ease, fill .46s ease;
+}
+.matrix-light.level-1 { opacity: .62; }
+.matrix-light.level-2 { opacity: 1; }
+.matrix-light.level-3 {
+  fill: var(--status-color);
+  opacity: 1;
+}
+.matrix-lights { filter: drop-shadow(0 0 3.8px #e5e6dc66); }
+.needs-attention .matrix-face { animation: matrix-attention 1.4s ease-in-out infinite; }
+.status-error .matrix-light.level-2 { fill: #dfb0aa; }
+.status-complete .matrix-light.level-2 { fill: #c6d4cb; }
 .workstream-activity h1 {
   width: 100%;
-  margin: 0 0 clamp(10px, 1.5vh, 21px);
+  box-sizing: border-box;
+  margin: 0 0 clamp(4px, .8vh, 12px);
+  padding-bottom: .13em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--status-color);
   font-size: clamp(38px, 5vw, 92px);
   font-weight: 500;
-  line-height: .86;
+  line-height: .9;
   letter-spacing: -.072em;
   text-transform: uppercase;
 }
@@ -292,7 +304,7 @@ header button:hover { color: #efeee9; }
 .board-count-1 .workstream { --identity-width: max(210px, 20vw); grid-template-columns: var(--identity-width) minmax(0, 1fr) auto; gap: clamp(30px, 4vw, 76px); }
 .board-count-1 .workstream-activity h1 { font-size: clamp(42px, 10.8cqw, 164px); }
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
-.board-count-1 .face { top: 59%; font-size: clamp(72px, 7vw, 126px); }
+.board-count-1 .matrix-face { top: 59%; width: min(calc(var(--identity-width) * .94), 315px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
 .board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(24px, 2.7cqw, 46px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
@@ -309,7 +321,7 @@ header button:hover { color: #efeee9; }
 .layout-compact .workstream-activity h1 { margin-bottom: 6px; }
 .layout-compact .agent-step { min-height: clamp(18px, 2.3vh, 27px); }
 .layout-compact .agent-step:first-child { min-height: clamp(24px, 3vh, 34px); }
-.layout-compact .face { top: 68%; font-size: clamp(42px, 4.2vw, 68px); }
+.layout-compact .matrix-face { top: 68%; width: min(calc(var(--identity-width) * .74), 205px); }
 
 /* Portrait displays have vertical room, so stop forcing the landscape's three
    major columns into a narrow strip. The timer/preview become a right rail. */
@@ -332,7 +344,7 @@ header button:hover { color: #efeee9; }
 .layout-portrait .agent-focus { min-height: clamp(48px, 4.8vh, 68px); font-size: clamp(20px, 3.3cqw, 34px); }
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
-.layout-portrait .face { left: 0; top: 62%; width: clamp(144px, 22vw, 236px); font-size: clamp(52px, 8vw, 84px); }
+.layout-portrait .matrix-face { left: clamp(72px, 11vw, 118px); top: 62%; width: clamp(150px, 22vw, 235px); }
 
 /* Respond to the feed's real width, not the overall window width. The identity
    and timer columns can leave this area compact even in a fairly wide window. */
@@ -368,7 +380,8 @@ header button:hover { color: #efeee9; }
 .completion-hero small { font: 400 clamp(9px, .7vw, 12px) "Geist Mono Variable", monospace; letter-spacing: .16em; color: #777a70; }
 .completion-hero h1 { margin: clamp(10px, 1.5vh, 20px) 0; font-size: clamp(62px, 8.5vw, 154px); font-weight: 500; line-height: .78; letter-spacing: -.08em; color: var(--complete); }
 .completion-hero p { margin: 0; font: 300 clamp(10px, .82vw, 14px) "Geist Mono Variable", monospace; letter-spacing: .05em; color: #92958b; }
-.completion-hero > span { margin-top: auto; padding-top: 24px; font: 300 clamp(28px, 3vw, 52px) "Geist Mono Variable", monospace; color: #777a70; }
+.completion-face { width: min(270px, 72%); margin-top: auto; padding-top: 24px; }
+.completion-face .matrix-face, .empty-face .matrix-face { position: static; display: block; width: 100%; transform: none; opacity: .9; }
 .completion-summary ol { list-style: none; min-width: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(18px, 2.4vw, 38px); }
 .completion-summary li { min-width: 0; padding: clamp(15px, 2vh, 28px) 0; border-top: 1px solid #34372f; }
 .completion-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-width: 0; }
@@ -386,7 +399,7 @@ header button:hover { color: #efeee9; }
 .idle-dot { width: 11px; height: 11px; margin-bottom: clamp(24px, 4vh, 54px); background: #74786f; box-shadow: 0 0 0 4px #ffffff08; }
 .empty-state h1 { margin: 0; font-size: clamp(86px, 16vw, 260px); font-weight: 500; line-height: .8; letter-spacing: -.085em; }
 .empty-state p { margin: clamp(24px, 4vh, 50px) 0 0; font: 300 clamp(13px, 1.4vw, 22px) "Geist Mono Variable", monospace; color: #8b8e84; }
-.empty-state span { margin-top: clamp(35px, 6vh, 80px); font: 300 clamp(18px, 2vw, 32px) "Geist Mono Variable", monospace; color: #6e7168; }
+.empty-face { width: clamp(150px, 18vw, 270px); margin-top: clamp(35px, 6vh, 80px); }
 
 footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; border-top: 1px solid #292b27; }
 .sync-error { color: var(--error); }
@@ -428,7 +441,8 @@ footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; b
 @keyframes panel-arrive { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
 @keyframes step-arrive { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes preview-arrive { from { opacity: 0; transform: translateY(6px); } }
-@keyframes face-breathe { 50% { opacity: .82; } }
+@keyframes matrix-breathe { 50% { opacity: .94; } }
+@keyframes matrix-attention { 50% { opacity: 1; filter: brightness(1.18); } }
 
 @media (max-width: 620px) {
   .app { padding: clamp(10px, 3.5vw, 20px); }
@@ -443,7 +457,7 @@ footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; b
   .identity-meta { margin-top: 5px; gap: 8px; }
   .model-identity small { max-width: 18ch; }
   .provider-icons i { width: 21px; height: 21px; }
-  .face { display: none; }
+  .matrix-face { display: none; }
   .model-identity small { font-size: 7px; }
   .board-count-1 .workstream-activity h1,
   .board-count-2 .workstream-activity h1,
@@ -470,13 +484,13 @@ footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; b
   .workstream-activity h1 { font-size: clamp(30px, min(6.5vw, 12vh), 68px); margin-bottom: 4px; }
   .workstream-identity h2 { font-size: clamp(12px, min(1.7vw, 3.8vh), 22px); }
   .identity-meta { margin-top: 6px; }
-  .face { font-size: clamp(26px, 8vh, 44px); }
+  .matrix-face { width: min(calc(var(--identity-width) * .56), 142px); }
   .agent-line { font-size: clamp(8px, min(.85vw, 2.4vh), 13px); }
   .agent-step, .agent-step:first-child { min-height: clamp(16px, 4.2vh, 23px); }
   .workstream time { font-size: clamp(19px, min(3.3vw, 7vh), 38px); }
   .completion-summary { padding: 12px 0; gap: 24px; }
   .completion-hero h1 { font-size: clamp(46px, min(8vw, 18vh), 92px); }
-  .completion-hero > span { font-size: 24px; }
+  .completion-face { width: min(190px, 56%); padding-top: 12px; }
   .completion-summary li { padding: 10px 0; }
   .completion-summary li > p { margin: 9px 0; }
 }

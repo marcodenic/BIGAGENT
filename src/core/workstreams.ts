@@ -3,6 +3,7 @@ import { initialState, reduceEvent, type DisplayState } from "./reducer";
 
 export interface AgentSession {
   id: string;
+  runId: string;
   source: string;
   workstreamId: string;
   workstreamName: string;
@@ -71,10 +72,14 @@ export function applySessionEvent(
   const model = metaText(event, "model") ?? "unknown model";
   const effort = metaText(event, "reasoningEffort") ?? "";
   const previous = sessions[sessionId];
-  const lastMessage = metaText(event, "lastMessage") ?? previous?.lastMessage ?? "";
+  const explicitRunId = metaText(event, "turnId") ?? metaText(event, "runId");
+  const beginsRun = event.kind === "session.start" || event.kind === "turn.start";
+  const runId = explicitRunId ?? (beginsRun ? event.id : previous?.runId ?? sessionId);
+  const sameRun = previous?.runId === runId;
+  const lastMessage = metaText(event, "lastMessage") ?? (sameRun ? previous.lastMessage : "");
   const startedAt = metaTime(event, "startedAtMs");
   const completedAt = metaTime(event, "completedAtMs");
-  const base: DisplayState = previous?.state ?? {
+  const base: DisplayState = sameRun ? previous.state : {
     ...initialState,
     recent: [],
     files: [],
@@ -88,7 +93,7 @@ export function applySessionEvent(
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
   return {
     ...sessions,
-    [sessionId]: { id: sessionId, source, workstreamId, workstreamName, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
+    [sessionId]: { id: sessionId, runId, source, workstreamId, workstreamName, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
   };
 }
 
@@ -105,7 +110,7 @@ export function replaceSessionSource(
   for (const event of events) next = applySessionEvent(next, event, now, source);
   // Preserve older display history without allowing it to mutate rebuilt state.
   for (const [id, session] of Object.entries(next)) {
-    if (session.source !== source || !previous[id]) continue;
+    if (session.source !== source || !previous[id] || previous[id].runId !== session.runId) continue;
     const seen = new Set<string>();
     session.state.recent = [...session.state.recent, ...previous[id].state.recent].filter((event) => !seen.has(event.id) && Boolean(seen.add(event.id))).slice(0, 80);
   }
