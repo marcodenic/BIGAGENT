@@ -155,7 +155,7 @@ header button:hover { color: #efeee9; }
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--status-color);
-  font-size: clamp(42px, 6.1vw, 112px);
+  font-size: clamp(38px, 5vw, 92px);
   font-weight: 500;
   line-height: .86;
   letter-spacing: -.072em;
@@ -186,20 +186,44 @@ header button:hover { color: #efeee9; }
 .agent-line:first-child { border-top-color: #34372f; }
 .agent-pulse { width: 7px; height: 7px; }
 .history-mark { color: #70736a; font-style: normal; text-align: center; }
-.history-depth-1 { opacity: .62; }
-.history-depth-2 { opacity: .42; }
-.history-depth-3 { opacity: .27; }
-.history-depth-4 { opacity: .15; }
 .agent-number { color: #8c8f85; }
 .agent-step strong { color: var(--status-color); font-weight: 500; letter-spacing: .03em; }
 .agent-tool { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #d8d7d0; white-space: nowrap; }
 .agent-detail { grid-column: 5; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c0c1b8; }
 .agent-step.no-tool .agent-detail { grid-column: 4 / 6; }
 .agent-target { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #696c64; }
-.narrative-step { min-height: clamp(34px, 4.2vh, 54px); font-size: 1.08em; }
-.narrative-step .agent-detail { color: #deded7; }
-.narrative-step strong { min-width: 0; }
-.telemetry-step { opacity: .48; }
+.agent-focus {
+  min-width: 0;
+  min-height: clamp(46px, 5.5vh, 70px);
+  display: grid;
+  grid-template-columns: 10px 36px minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(8px, .9vw, 16px);
+  padding-block: clamp(5px, .7vh, 10px);
+  font: 400 clamp(20px, 2.25cqw, 38px)/1.08 "Geist Variable", system-ui, sans-serif;
+  letter-spacing: -.035em;
+}
+.agent-focus .agent-number {
+  font: 300 .58em/1 "Geist Mono Variable", monospace;
+  letter-spacing: -.04em;
+  white-space: nowrap;
+}
+.agent-focus > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e5de; }
+.agent-commentary {
+  min-width: 0;
+  min-height: clamp(28px, 3.5vh, 44px);
+  display: grid;
+  grid-template-columns: 10px 26px minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(8px, .9vw, 16px);
+  color: #9b9d94;
+  opacity: .76;
+}
+.agent-commentary i { grid-column: 1; color: #70736a; font-style: normal; text-align: center; }
+.agent-commentary span { grid-column: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.telemetry-step { opacity: .58; }
+.telemetry-depth-1 { opacity: .42; }
+.telemetry-depth-2 { opacity: .27; }
 .extra-agents { margin: 9px 0 0 43px; font: 400 9px "Geist Mono Variable", monospace; letter-spacing: .11em; color: #73766d; }
 
 .workstream time {
@@ -248,15 +272,14 @@ header button:hover { color: #efeee9; }
 .workstream.status-complete time { color: var(--complete); }
 
 .board-count-1 .workstream { grid-template-columns: minmax(210px, 20vw) minmax(0, 1fr) auto; gap: clamp(30px, 4vw, 76px); }
-.board-count-1 .workstream-activity h1 { font-size: clamp(24px, 15.5cqw, 228px); }
+.board-count-1 .workstream-activity h1 { font-size: clamp(42px, 10.8cqw, 164px); }
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
-.board-count-1 .agent-step:first-child { min-height: clamp(48px, 6vh, 76px); }
-.board-count-1 .narrative-step { min-height: clamp(48px, 6vh, 76px); }
+.board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(24px, 2.7cqw, 46px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
-.board-count-2 .agent-step:first-child { min-height: clamp(38px, 4.6vh, 58px); }
-.board-count-2 .workstream-activity h1 { font-size: clamp(64px, 8vw, 140px); }
-.board-count-3 .workstream-activity h1 { font-size: clamp(50px, 6.2vw, 108px); }
+.board-count-2 .agent-focus { min-height: clamp(44px, 5vh, 62px); }
+.board-count-2 .workstream-activity h1 { font-size: clamp(54px, 6.5vw, 112px); }
+.board-count-3 .workstream-activity h1 { font-size: clamp(44px, 5.4vw, 92px); }
 .board-count-4 .workstream-activity h1, .board-count-5 .workstream-activity h1 { font-size: clamp(35px, 4.3vw, 76px); margin-bottom: 8px; }
 .board-count-4 .workstream, .board-count-5 .workstream { padding: 12px 0; }
 .board-count-3 .agent-preview, .board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-max-width: clamp(110px, 12vw, 210px); }

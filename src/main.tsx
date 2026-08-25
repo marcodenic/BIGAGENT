@@ -70,6 +70,19 @@ function compactText(value: string, fallback: string) {
   return text || fallback;
 }
 
+function displayText(value: string, fallback: string) {
+  const text = value
+    .replace(/^\s{0,3}#{1,6}\s+/g, "")
+    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*+]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || fallback;
+}
+
 function commandName(command: string) {
   const executable = command.trim().split(/\s+/)[0] ?? "";
   return executable.split("/").pop() ?? executable;
@@ -139,13 +152,19 @@ function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
     const label = event.label?.toUpperCase() || activityLabels[status];
     const tool = event.tool || (event.command ? commandName(event.command) : "");
     const rawDetail = event.detail || event.command || (event.files?.length ? `Updating ${event.files.slice(0, 2).join(", ")}` : "Working");
-    const detail = privacy ? "Agent activity in progress" : compactText(rawDetail, "Working");
+    const detail = privacy ? "Agent activity in progress" : displayText(rawDetail, "Working");
     const target = privacy ? "" : event.target || "";
     const key = `${label}\u0000${tool}\u0000${detail}\u0000${target}`;
     if (seen.has(key)) return [];
     seen.add(key);
     const narrative = event.meta?.activityClass === "narrative";
-    return [{ id: event.id, status, label, tool, detail, target, narrative }];
+    const declaredKind = event.meta?.narrativeKind;
+    const narrativeKind = declaredKind === "reasoning" || event.kind === "reasoning.summary"
+      ? "reasoning"
+      : declaredKind === "message" || narrative
+        ? "message"
+        : null;
+    return [{ id: event.id, status, label, tool, detail, target, narrativeKind }];
   }).slice(0, limit);
 }
 
@@ -179,13 +198,23 @@ function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
 
 function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
   const available = activitySteps(agent, privacy, 80);
-  const narrative = available.filter((step) => step.narrative).slice(0, 2);
-  const telemetry = available.filter((step) => !step.narrative).slice(0, Math.max(1, trailLimit - narrative.length));
-  const steps = [...narrative, ...telemetry];
+  const reasoning = available.find((step) => step.narrativeKind === "reasoning");
+  const message = available.find((step) => step.narrativeKind === "message");
+  const focus = reasoning ?? message ?? available[0];
+  const commentary = message?.id !== focus?.id ? message : undefined;
+  const telemetry = available
+    .filter((step) => step.narrativeKind === null && step.id !== focus?.id)
+    .slice(0, Math.min(3, Math.max(1, trailLimit)));
   return <li className={`agent-line status-${agent.state.status}`}>
-    {steps.map((step, depth) => <div key={step.id} className={`agent-step ${step.narrative ? "narrative-step" : "telemetry-step"} ${step.tool ? "has-tool" : "no-tool"} status-${step.status} history-depth-${depth}`}>
-      {depth === 0 ? <i className="agent-pulse" aria-hidden="true" /> : <i className="history-mark" aria-hidden="true">·</i>}
-      <span className="agent-number">{depth === 0 ? String(index + 1).padStart(2, "0") : ""}</span>
+    {focus && <div className={`agent-focus status-${focus.status}`}>
+      <i className="agent-pulse" aria-hidden="true" />
+      <span className="agent-number">{String(index + 1).padStart(2, "0")}</span>
+      <span>{focus.detail}</span>
+    </div>}
+    {commentary && <div className="agent-commentary"><i aria-hidden="true">·</i><span>{commentary.detail}</span></div>}
+    {telemetry.map((step, depth) => <div key={step.id} className={`agent-step telemetry-step telemetry-depth-${depth} ${step.tool ? "has-tool" : "no-tool"} status-${step.status}`}>
+      <i className="history-mark" aria-hidden="true">·</i>
+      <span className="agent-number" />
       <strong>{step.label}</strong>
       {step.tool && <span className="agent-tool">· {step.tool}</span>}
       <span className="agent-detail">{step.detail}</span>

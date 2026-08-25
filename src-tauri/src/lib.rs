@@ -220,10 +220,11 @@ fn desktop_record_event(thread: &str, turn: &str, turn_status: &str, item_type: 
   }
   if turn_status == "completed" { status = "complete"; label = "DONE"; if detail == "Codex desktop task active" { detail = "Codex task complete".into(); } }
   if turn_status == "interrupted" { status = "error"; label = "STOPPED"; detail = "Codex task was interrupted".into(); }
-  let kind = if status == "complete" { "complete" } else if status == "error" { "error" } else { "activity" };
+  let kind = if status == "complete" { "complete" } else if status == "error" { "error" } else if item_type == "reasoning" { "reasoning.summary" } else { "activity" };
   let has_reasoning_summary = item_type == "reasoning" && item.get("summary").and_then(Value::as_array).is_some_and(|summary| summary.iter().any(|value| value.as_str().is_some_and(|text| !text.trim().is_empty())));
   let activity_class = if item_type == "agentMessage" || has_reasoning_summary { "narrative" } else if matches!(item_type, "imageView" | "imageGeneration") { "visual" } else { "telemetry" };
-  serde_json::json!({"version":1,"id":format!("codex-session-{turn}-{ordinal}"),"timestamp":"","kind":kind,"status":status,"label":label,"detail":detail,"files":files,"command":command,"tool":tool,"target":target,"meta":{"sessionId":thread,"turnId":turn,"threadId":thread,"workstreamId":display.workstream_id,"workstreamName":display.workstream_name,"taskName":display.task_name,"sessionName":display.agent_name,"agentName":display.agent_name,"modelProvider":display.model_provider,"model":display.model,"reasoningEffort":display.reasoning_effort,"activityClass":activity_class,"lastMessage":last_message,"startedAtMs":started_at.saturating_mul(1000),"completedAtMs":completed_at.map(|value| value.saturating_mul(1000))}})
+  let narrative_kind = if has_reasoning_summary { Some("reasoning") } else if item_type == "agentMessage" { Some("message") } else { None };
+  serde_json::json!({"version":1,"id":format!("codex-session-{turn}-{ordinal}"),"timestamp":"","kind":kind,"status":status,"label":label,"detail":detail,"files":files,"command":command,"tool":tool,"target":target,"meta":{"sessionId":thread,"turnId":turn,"threadId":thread,"workstreamId":display.workstream_id,"workstreamName":display.workstream_name,"taskName":display.task_name,"sessionName":display.agent_name,"agentName":display.agent_name,"modelProvider":display.model_provider,"model":display.model,"reasoningEffort":display.reasoning_effort,"activityClass":activity_class,"narrativeKind":narrative_kind,"lastMessage":last_message,"startedAtMs":started_at.saturating_mul(1000),"completedAtMs":completed_at.map(|value| value.saturating_mul(1000))}})
 }
 
 #[tauri::command]
@@ -304,6 +305,18 @@ pub fn run() { tauri::Builder::default().manage(WakeLockState::default()).setup(
 #[cfg(test)]
 mod tests {
   use super::*;
+  #[test]
+  fn marks_reasoning_summaries_as_public_focus_narrative() {
+    let display = ThreadDisplayMeta {
+      workstream_id: "project".into(), workstream_name: "PROJECT".into(), task_name: "Task".into(),
+      agent_name: "Agent".into(), model_provider: "openai".into(), model: "gpt".into(), reasoning_effort: "medium".into(),
+    };
+    let event = desktop_record_event("thread", "turn", "inProgress", "reasoning", r#"{"summary":["**Planning the next check**"]}"#, 1, &display, 1, None, None, None);
+    assert_eq!(event.get("kind").and_then(Value::as_str), Some("reasoning.summary"));
+    assert_eq!(event.pointer("/meta/activityClass").and_then(Value::as_str), Some("narrative"));
+    assert_eq!(event.pointer("/meta/narrativeKind").and_then(Value::as_str), Some("reasoning"));
+  }
+
   #[test]
   fn reads_codex_desktop_sessions() {
     let sessions = codex_desktop_sessions().expect("desktop session query should succeed");
