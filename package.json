@@ -2,31 +2,76 @@
   "name": "big-agent",
   "private": true,
   "version": "0.1.0",
+  "description": "An ambient room-scale display for autonomous agents",
+  "author": "BIG AGENT contributors",
   "type": "module",
+  "main": "./out/main/index.js",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "dev": "node scripts/electron-vite.mjs",
+    "build": "tsc -b && electron-vite build",
+    "start": "node scripts/electron-vite.mjs preview",
+    "preview": "node scripts/electron-vite.mjs preview",
+    "package": "pnpm build && electron-builder",
+    "package:dir": "pnpm build && electron-builder --dir",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "tauri": "tauri"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "@lobehub/icons-static-svg": "^1.94.0",
-    "@tauri-apps/api": "^2.8.0",
-    "@tauri-apps/plugin-opener": "^2.2.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.8.1",
+    "@types/node": "^26.3.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "42.1.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.bigagent.display",
+    "productName": "BIG AGENT",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/assets/128x128.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "telemetry/otel-collector.yaml",
+        "to": "telemetry/otel-collector.yaml"
+      },
+      {
+        "from": "scripts/big-agent.mjs",
+        "to": "bin/big-agent.mjs"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "electron/assets/128x128.png"
+    },
+    "mac": {
+      "icon": "electron/assets/icon.icns"
+    },
+    "win": {
+      "icon": "electron/assets/icon.ico"
+    }
   }
 }

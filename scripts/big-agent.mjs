@@ -1,15 +1,126 @@
 #!/usr/bin/env node
-/** Local helper for the open BIG AGENT protocol. No repository contents leave localhost. */
+/** Local telemetry bridge. No repository contents leave localhost. */
 import { spawn } from "node:child_process";
-const endpoint = process.env.BIG_AGENT_URL || "http://127.0.0.1:19777/event";
-const send = async (value) => {
-  const event = value.version ? value : { version: 1, id: crypto.randomUUID(), timestamp: new Date().toISOString(), kind: value.status === "complete" ? "complete" : value.status === "error" ? "error" : "activity", ...value };
-  const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(event) });
-  if (!response.ok) throw new Error(`BIG AGENT protocol returned ${response.status}`);
-};
+
+const configuredUrl = process.env.BIG_AGENT_URL || "http://127.0.0.1:19777/event";
+const serverUrl = new URL(configuredUrl);
+serverUrl.pathname = serverUrl.pathname === "/event" ? "" : serverUrl.pathname.replace(/\/$/, "");
+
+async function post(path, value, headers = {}) {
+  const endpoint = new URL(serverUrl);
+  endpoint.pathname = `${serverUrl.pathname.replace(/\/$/, "")}${path}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(value),
+  });
+  if (!response.ok) throw new Error(`BIG AGENT returned ${response.status}: ${await response.text()}`);
+}
+
+async function send(value) {
+  const event = value.version ? value : {
+    version: 1,
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    kind: value.status === "complete" ? "complete" : value.status === "error" ? "error" : "activity",
+    ...value,
+  };
+  await post("/event", event);
+}
+
+function eachJsonLine(stream, listener) {
+  stream.setEncoding("utf8");
+  let buffer = "";
+  stream.on("data", (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines.filter(Boolean)) {
+      try { listener(JSON.parse(line)); } catch { /* Preserve the wrapped process when output is not JSON. */ }
+    }
+  });
+  stream.on("end", () => {
+    if (!buffer.trim()) return;
+    try { listener(JSON.parse(buffer)); } catch { /* Ignore a final non-JSON fragment. */ }
+  });
+}
+
+function proxyStructured(source, command, args) {
+  const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
+  eachJsonLine(child.stdout, (value) => {
+    void post(`/sources/${encodeURIComponent(source)}`, value, { "x-big-agent-direction": "agent-to-client" }).catch(() => undefined);
+  });
+  // Preserve the exact agent protocol stream while observing it.
+  child.stdout.on("data", (chunk) => process.stdout.write(chunk));
+  child.stderr.pipe(process.stderr);
+  process.stdin.on("data", (chunk) => child.stdin.write(chunk));
+  eachJsonLine(process.stdin, (value) => {
+    void post(`/sources/${encodeURIComponent(source)}`, value, { "x-big-agent-direction": "client-to-agent" }).catch(() => undefined);
+  });
+  process.stdin.on("end", () => child.stdin.end());
+  child.on("error", (error) => {
+    console.error(`Unable to launch ${command}: ${error.message}`);
+    process.exitCode = 1;
+  });
+  child.on("exit", (code, signal) => {
+    if (signal) process.kill(process.pid, signal);
+    else process.exitCode = code ?? 1;
+  });
+}
+
 const [, , verb, ...rest] = process.argv;
-if (verb === "emit") { const input = rest.join(" "); try { await send(JSON.parse(input)); } catch (error) { console.error(`big-agent emit: ${error.message}`); process.exitCode = 1; } }
-else if (verb === "pipe") { let buffer = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => buffer += chunk); process.stdin.on("end", async () => { for (const line of buffer.split("\n").filter(Boolean)) { try { await send(JSON.parse(line)); } catch (error) { console.error(`Skipping protocol line: ${error.message}`); } } }); }
-else if (verb === "run" && rest[0] === "--" && rest[1]) { const [command, ...args] = rest.slice(1); await send({ status: "command", command: [command, ...args].join(" "), label: "RUNNING" }); const child = spawn(command, args, { stdio: "inherit" }); child.on("error", async (error) => { await send({ status: "error", detail: error.message }); process.exitCode = 1; }); child.on("exit", async (code) => { await send(code === 0 ? { status: "complete", detail: "Process completed" } : { status: "error", detail: `Process exited with code ${code}`, exitCode: code }); process.exitCode = code ?? 1; }); }
-else if (verb === "codex" && rest[0] === "--" && rest[1]) { const [command, ...args] = rest.slice(1); const child = spawn(command, [...args, "--json"], { stdio: ["inherit", "pipe", "inherit"] }); let buffer = ""; child.stdout.setEncoding("utf8"); child.stdout.on("data", async (chunk) => { buffer += chunk; const lines = buffer.split("\n"); buffer = lines.pop() ?? ""; for (const line of lines.filter(Boolean)) { try { await send(JSON.parse(line)); } catch { /* preserve the Codex process if one malformed line appears */ } } }); child.on("exit", (code) => { process.exitCode = code ?? 1; }); }
-else { console.error("Usage: big-agent emit '{\"status\":\"thinking\"}' | big-agent pipe | big-agent run -- <command> [args] | big-agent codex -- codex exec <prompt>"); process.exitCode = 2; }
+
+if (verb === "emit") {
+  const input = rest.join(" ");
+  try { await send(JSON.parse(input)); }
+  catch (error) { console.error(`big-agent emit: ${error.message}`); process.exitCode = 1; }
+} else if (verb === "pipe") {
+  eachJsonLine(process.stdin, (value) => void send(value).catch((error) => console.error(`Skipping protocol line: ${error.message}`)));
+} else if (verb === "hook" && rest[0]) {
+  const provider = rest[0].toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { input += chunk; });
+  process.stdin.on("end", async () => {
+    try {
+      await post(`/hooks/${encodeURIComponent(provider)}`, input.trim() ? JSON.parse(input) : {});
+      process.stdout.write('{"continue":true}\n');
+    } catch (error) {
+      // Monitoring must never block the host agent's lifecycle.
+      console.error(`BIG AGENT hook unavailable: ${error.message}`);
+      process.stdout.write('{"continue":true}\n');
+    }
+  });
+} else if (verb === "run" && rest[0] === "--" && rest[1]) {
+  const [command, ...args] = rest.slice(1);
+  await send({ status: "command", phase: "executing", command: [command, ...args].join(" "), label: "RUNNING" });
+  const child = spawn(command, args, { stdio: "inherit" });
+  child.on("error", async (error) => { await send({ status: "error", phase: "failed", detail: error.message }); process.exitCode = 1; });
+  child.on("exit", async (code) => {
+    await send(code === 0
+      ? { status: "complete", phase: "completing", detail: "Process completed" }
+      : { status: "error", phase: "failed", detail: `Process exited with code ${code}`, exitCode: code });
+    process.exitCode = code ?? 1;
+  });
+} else if (verb === "codex" && rest[0] === "--" && rest[1]) {
+  const [command, ...args] = rest.slice(1);
+  const child = spawn(command, [...args, "--json"], { stdio: ["inherit", "pipe", "inherit"] });
+  eachJsonLine(child.stdout, (value) => void post("/sources/codex-json", value).catch(() => undefined));
+  child.stdout.pipe(process.stdout);
+  child.on("exit", (code) => { process.exitCode = code ?? 1; });
+} else if (verb === "proxy" && ["acp", "codex-app-server"].includes(rest[0]) && rest[1] === "--" && rest[2]) {
+  const [source, , command, ...args] = rest;
+  proxyStructured(source, command, args);
+} else {
+  console.error([
+    "Usage:",
+    "  big-agent emit '{\"status\":\"thinking\"}'",
+    "  big-agent pipe < events.jsonl",
+    "  big-agent hook <claude|cursor|gemini|grok|cline|windsurf>",
+    "  big-agent run -- <command> [args]",
+    "  big-agent codex -- codex exec <prompt>",
+    "  big-agent proxy codex-app-server -- codex app-server",
+    "  big-agent proxy acp -- <agent> --acp",
+  ].join("\n"));
+  process.exitCode = 2;
+}

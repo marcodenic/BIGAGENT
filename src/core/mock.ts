@@ -1,7 +1,7 @@
 import { normalizeSimpleEvent, type AgentEvent, type SimpleEvent } from "./protocol";
 
 const script: Array<SimpleEvent & { wait: number }> = [
-  { status: "command", label: "BUILDING", tool: "cargo build", detail: "Compiling desktop crate 42 of 96", target: "src-tauri", meta: { sessionId: "linux-01", threadId: "proper-linux", workstreamName: "PROPER LINUX", agentName: "Build agent" }, wait: 700 },
+  { status: "command", label: "BUILDING", tool: "pnpm build", detail: "Bundling the Electron desktop app", target: "electron", meta: { sessionId: "linux-01", threadId: "proper-linux", workstreamName: "PROPER LINUX", agentName: "Build agent" }, wait: 700 },
   { status: "testing", tool: "vitest", detail: "Running Fedora install smoke test", target: "installer", meta: { sessionId: "linux-02", threadId: "proper-linux", workstreamName: "PROPER LINUX", agentName: "Test agent" }, wait: 700 },
   { status: "thinking", detail: "Investigating packaging failure", meta: { sessionId: "linux-03", threadId: "proper-linux", workstreamName: "PROPER LINUX", agentName: "Review agent" }, wait: 700 },
   { status: "editing", label: "EDITING", tool: "apply_patch", detail: "Wiring events into session adapter", target: "src/adapters/codex.ts", meta: { sessionId: "big-agent-01", threadId: "big-agent", workstreamName: "BIG AGENT", agentName: "UI agent" }, wait: 700 },

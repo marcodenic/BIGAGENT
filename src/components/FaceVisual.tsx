@@ -1,10 +1,11 @@
 import { memo, useEffect, useState } from "react";
-import type { AgentStatus } from "../core/protocol";
+import type { AgentPhase, AgentStatus } from "../core/protocol";
 import { AnimatedFace } from "./AnimatedFace";
 import { MatrixFace } from "./MatrixFace";
 
 type FaceVisualProps = {
   status: AgentStatus;
+  phase?: AgentPhase;
   label: string;
   seed: number;
   personality: number;
@@ -26,12 +27,13 @@ function LegacyMatrixFace(props: FaceVisualProps) {
 /** Temporary comparison switch: append ?face=matrix to keep the previous face. */
 function FaceVisualComponent(props: FaceVisualProps) {
   if (faceImplementation === "matrix") return <LegacyMatrixFace {...props} />;
-  return <AnimatedFace attention={props.attention} personality={props.personality} seed={props.seed} status={props.status} />;
+  return <AnimatedFace attention={props.attention} personality={props.personality} phase={props.phase} seed={props.seed} status={props.status} />;
 }
 
 export const FaceVisual = memo(FaceVisualComponent, (previous, next) => {
   if (faceImplementation === "matrix" && previous.label !== next.label) return false;
   return previous.status === next.status
+    && previous.phase === next.phase
     && previous.seed === next.seed
     && previous.personality === next.personality
     && previous.attention === next.attention;

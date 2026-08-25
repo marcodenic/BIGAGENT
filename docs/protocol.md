@@ -18,4 +18,8 @@ The complete versioned form is:
 
 Supported kinds: `session.start`, `session.end`, `turn.start`, `turn.end`, `activity`, `reasoning.summary`, `plan`, `command.start`, `command.end`, `files.changed`, `test.result`, `approval.requested`, `input.requested`, `error`, `complete`, and `usage`. `reasoning.summary` means a short summary the agent chose to expose; BIG AGENT neither requests nor presents private chain-of-thought.
 
-Optional fields are `label`, `detail`, `files`, `command`, `tool`, `target`, `exitCode`, `plan`, `usage`, and `meta`. Workstream-aware producers should set `meta.sessionId`, `meta.workstreamId`, `meta.workstreamName`, and optionally `meta.agentName`. Sessions sharing a `workstreamId` render together. Malformed JSON is rejected with HTTP 400.
+Optional fields are `label`, `detail`, `phase`, `files`, `command`, `tool`, `target`, `exitCode`, `plan`, `usage`, and `meta`. Supported phases are `idle`, `starting`, `planning`, `searching`, `executing`, `editing`, `testing`, `waiting`, `responding`, `delegating`, `retrying`, `receiving`, `uploading`, `notifying`, `completing`, and `failed`.
+
+`status` is the compact display category; `phase` expresses the observed operation. For example, both a streamed response and a received tool result may have status `working`, while their phases are `responding` and `receiving`. This lets the shipped Grok animation engine represent real activity without inventing random state changes.
+
+Workstream-aware producers should set `meta.sessionId`, `meta.workstreamId`, `meta.workstreamName`, and optionally `meta.agentName`. Sessions sharing a `workstreamId` render together. Malformed JSON is rejected with HTTP 400.

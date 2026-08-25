@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus } from "./protocol";
+import type { AgentEvent, AgentPhase, AgentStatus } from "./protocol";
 import { initialState, reduceEvent, type DisplayState } from "./reducer";
 
 export interface AgentSession {
@@ -21,6 +21,7 @@ export interface Workstream {
   name: string;
   agents: AgentSession[];
   status: AgentStatus;
+  phase: AgentPhase;
   label: string;
   attention: boolean;
   startedAt: number | null;
@@ -47,6 +48,14 @@ const activeStatuses = new Set<AgentStatus>([
 ]);
 
 const genericLabels = new Set(["READY", "THINKING", "SEARCHING", "WORKING", "RUNNING", "EDITING", "RUNNING TESTS", "NEEDS YOU", "DONE", "SOMETHING BROKE"]);
+
+function sourcePriority(source: string) {
+  if (source === "codex-desktop-fallback" || source.includes("fallback")) return 10;
+  if (source === "protocol" || source === "process") return 40;
+  if (source.includes("hooks") || source.includes("otlp") || source.includes("sse")) return 70;
+  if (source.includes("app-server") || source.includes("acp")) return 90;
+  return 50;
+}
 
 function metaText(event: AgentEvent, key: string) {
   const value = event.meta?.[key];
@@ -88,6 +97,10 @@ export function applySessionEvent(
     project: workstreamName,
     startedAt: startedAt ?? null,
   };
+  // An official live transport wins over a passive database/log fallback for
+  // the same provider session. The fallback remains available when no proper
+  // feed has been connected.
+  if (previous && previous.runId === runId && sourcePriority(previous.source) > sourcePriority(source)) return sessions;
   const state = reduceEvent(base, event, now);
   if (startedAt !== undefined) state.startedAt = startedAt;
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
@@ -139,6 +152,7 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
       name: lead.workstreamName,
       agents,
       status: aggregate.state.status,
+      phase: aggregate.state.phase,
       label: attention ? aggregate.state.label : explicitLabel ?? (mixedActive ? "WORKING" : aggregate.state.label),
       attention,
       startedAt: agents.reduce<number | null>((oldest, agent) => {

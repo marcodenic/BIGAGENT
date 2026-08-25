@@ -1,6 +1,6 @@
 # BIG AGENT
 
-An ambient, room-scale status display for autonomous coding agents. BIG AGENT is a native Tauri desktop application: stable workstream rows, enormous overall states, live per-agent activity, timers, permanent status dots, and tiny optional ASCII companions.
+An ambient, room-scale status display for autonomous coding agents. BIG AGENT is an Electron desktop application: stable workstream rows, enormous overall states, live per-agent activity, timers, and animated Grok Bot faces rendered by Chromium.
 
 While agents are running, BIG AGENT asks the operating system to keep the display awake. The wake lock is released as soon as all agents complete or stop, and whenever the app exits.
 
@@ -8,24 +8,24 @@ It is intentionally not an IDE, terminal, or dashboard. The default display grou
 
 ## Run locally
 
-Prerequisites: Node 20+, Rust, and the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/).
+Prerequisite: Node 22.12 or newer.
 
 ```bash
 pnpm install
-pnpm tauri dev
+pnpm dev
 ```
 
-Create distributable platform packages with `pnpm tauri build`. Tauri's bundler produces the appropriate installers for the host platform; build separately on macOS, Windows, and Linux for all three targets.
+Create a distributable platform package with `pnpm package`. Electron Builder produces an AppImage on Linux and uses the configured native installer target on macOS or Windows; build on each target platform for all three formats.
 
 ## Controls
 
-`F` fullscreen · `Esc` exit fullscreen · `I` inspection · `A` always on top · `?` shortcuts. Hover the footer for the privacy control. Privacy mode hides file names, commands, paths, and detailed labels. ASCII faces change automatically with agent status.
+`F` fullscreen · `Esc` exit fullscreen · `I` inspection · `?` shortcuts. Hover the footer for the privacy control. Privacy mode hides file names, commands, paths, and detailed labels. Grok Bot expressions change automatically with agent status.
 
 ## Connect an agent
 
-BIG AGENT is agent-neutral. Adapters translate structured agent activity into the versioned BIG AGENT protocol, then the deterministic reducer creates UI state. Agent-specific parsing never occurs in React components.
+BIG AGENT is agent-neutral. A main-process telemetry hub accepts official structured transports, keeps source provenance, deduplicates retransmissions, and projects activity into the compact versioned BIG AGENT protocol. Agent-specific parsing never occurs in React components.
 
-When running beside Codex desktop, BIG AGENT reads the app's local structured thread ledger and groups turns from the same task into one stable workstream. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished turns remain visible briefly, then age out automatically; amber and red states remain conspicuous without moving rows around.
+When running beside Codex Desktop, the read-only local thread ledger remains available as a passive fallback. Official Codex App Server or `exec --json` events take priority for the same session. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished turns remain visible briefly, then age out automatically; amber and red states remain conspicuous without moving rows around.
 
 With BIG AGENT running, send a simple event:
 
@@ -51,15 +51,51 @@ That wrapper reports running, completion, and non-zero exits. A dedicated adapte
 
 ### Codex
 
-Use Codex's public structured activity stream—not rendered terminal text—and map events through `src/core/adapters.ts`'s `codexAdapter`. It supports public summaries, plans, commands, edits, failures, completions, and timing without exposing private chain-of-thought. Forward its normalized JSON to the local protocol endpoint or the `pipe` helper.
+Observe an `exec --json` run with:
+
+```bash
+node scripts/big-agent.mjs codex -- codex exec "your task"
+```
+
+Use BIG AGENT as a transparent App Server monitor when configuring a client:
+
+```bash
+node scripts/big-agent.mjs proxy codex-app-server -- codex app-server
+```
+
+### OpenTelemetry
+
+Products with native OTLP support can send `http/json` directly to `http://127.0.0.1:19777`, or use the standard OpenTelemetry Collector for the usual protobuf and gRPC transports:
+
+```bash
+otelcol --config telemetry/otel-collector.yaml
+```
+
+Point the product at `http://127.0.0.1:4318` for OTLP/HTTP or `127.0.0.1:4317` for OTLP/gRPC. The included Collector configuration converts the standard signals to OTLP/JSON for BIG AGENT.
+
+### Hooks, OpenCode, and ACP
+
+Use this command as a lifecycle hook in supported products, replacing the provider name as appropriate:
+
+```bash
+node /absolute/path/to/BIGAGENT/scripts/big-agent.mjs hook claude
+```
+
+The hook bridge deliberately returns success even if BIG AGENT is closed, so monitoring cannot block an agent. OpenCode's global SSE feed is detected at `http://127.0.0.1:4096`; set `BIG_AGENT_OPENCODE_URL` before launching BIG AGENT when using another address. ACP agents can be observed transparently with:
+
+```bash
+node scripts/big-agent.mjs proxy acp -- your-agent --acp
+```
+
+Inspect live source health at `http://127.0.0.1:19777/health`.
 
 ## Architecture
 
 ```text
-Agent → adapter → normalized AgentEvent → reducer → DisplayState → React UI
+Official feed / OTLP / hook / ACP / SSE → telemetry hub → AgentEvent → reducer → React UI
 ```
 
-The app operates locally. Its protocol server listens only on `127.0.0.1:19777`; it has no account, cloud service, or repository upload path.
+The Electron main process owns source connections, normalization, the read-only Codex fallback, wake lock, image bridge, and local telemetry server. The renderer runs with Chromium sandboxing, context isolation, and no Node.js integration. The app operates locally: its server listens only on `127.0.0.1:19777`, and it has no account, cloud service, or repository upload path.
 
 - [Protocol](docs/protocol.md)
 - [Adapter guide](docs/adapters.md)
@@ -71,5 +107,5 @@ The app operates locally. Its protocol server listens only on `127.0.0.1:19777`;
 pnpm test
 ```
 
-Tests cover protocol normalization, malformed input, state transitions, attention states, elapsed-time freezing, completion, errors, and duplicate events.
+Tests cover protocol, hook, OTLP, ACP, OpenCode and Codex normalization; source deduplication; state transitions; Grok phase mapping; attention; completion; and errors.
  

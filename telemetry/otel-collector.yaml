@@ -1,0 +1,34 @@
+# Accept the standard OTLP protocols from agent products and SDKs, then let
+# BIG AGENT consume portable OTLP/JSON on its loopback telemetry endpoint.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch:
+    timeout: 250ms
+
+exporters:
+  otlp_http/big_agent:
+    endpoint: http://127.0.0.1:19777
+    encoding: json
+    compression: none
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/big_agent]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/big_agent]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/big_agent]

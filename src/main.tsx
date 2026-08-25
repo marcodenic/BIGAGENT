@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FaceVisual } from "./components/FaceVisual";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
+import { desktopApi, exitAppFullscreen, toggleAppFullscreen } from "./desktop";
 import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
 import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg";
@@ -31,26 +29,6 @@ function faceHash(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
-}
-
-function personalitiesForWorkstreams(workstreams: Workstream[]) {
-  const assigned = new Map<string, number>();
-  const visible = new Set<number>();
-  for (const workstream of workstreams) {
-    const hash = faceHash(workstream.id);
-    const start = hash % 8;
-    let personality = start;
-    for (let step = 0; step < 8; step += 1) {
-      const candidate = (start + step) % 8;
-      if (!visible.has(candidate)) {
-        personality = candidate;
-        break;
-      }
-    }
-    visible.add(personality);
-    assigned.set(workstream.id, personality);
-  }
-  return assigned;
 }
 
 const activityLabels: Record<AgentStatus, string> = {
@@ -91,20 +69,6 @@ function useViewport() {
     return () => window.removeEventListener("resize", update);
   }, []);
   return viewport;
-}
-
-function isTauri() {
-  return "__TAURI_INTERNALS__" in window;
-}
-
-async function toggleAppFullscreen() {
-  if (isTauri()) {
-    const appWindow = getCurrentWindow();
-    await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
-    return;
-  }
-  if (document.fullscreenElement) await document.exitFullscreen();
-  else await document.documentElement.requestFullscreen();
 }
 
 function compactText(value: string, fallback: string) {
@@ -218,11 +182,12 @@ function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
   const [source, setSource] = useState("");
   const [aspectRatio, setAspectRatio] = useState("16 / 9");
   useEffect(() => {
+    const desktop = desktopApi();
     let disposed = false;
     setSource("");
     setAspectRatio("16 / 9");
-    if (!path || privacy || !isTauri()) return;
-    invoke<string>("image_preview", { path }).then((value) => { if (!disposed) setSource(value); }).catch(() => undefined);
+    if (!path || privacy || !desktop) return;
+    desktop.imagePreview(path).then((value) => { if (!disposed) setSource(value); }).catch(() => undefined);
     return () => { disposed = true; };
   }, [path, privacy]);
   if (!source) return null;
@@ -295,7 +260,7 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
         <ModelIdentity agents={workstream.agents} />
       </div>
     </div>
-    <FaceVisual status={workstream.status} label={workstream.label} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
+    <FaceVisual status={workstream.status} phase={workstream.phase} label={workstream.label} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
     <div className="workstream-activity">
       <h1>{workstream.label}</h1>
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
@@ -311,7 +276,7 @@ function CompletionSummary({ agents, privacy }: { agents: AgentSession[]; privac
   return <section className="completion-summary" aria-live="polite">
     <div className="completion-hero">
       <div><small>AGENT DEPARTURES</small><h1>ALL DONE</h1><p>{plural(agents.length, "AGENT")} · {formatElapsed(totalRuntime)} COMBINED</p></div>
-      <div className="completion-face"><FaceVisual status="complete" label="DONE" seed={faceHash(agents.map((agent) => agent.id).join("|"))} personality={agents.length % 8} attention={false} /></div>
+      <div className="completion-face"><FaceVisual status="complete" phase="completing" label="DONE" seed={faceHash(agents.map((agent) => agent.id).join("|"))} personality={faceHash(agents.map((agent) => agent.id).join("|"))} attention={false} /></div>
     </div>
     <ol>{visible.map((agent) => <li key={agent.id}>
       <div className="completion-title"><div><h2>{agent.workstreamName}</h2><span>{agent.agentName}</span></div><ModelIdentity agents={[agent]} /></div>
@@ -352,24 +317,35 @@ function App() {
   const apply = (event: AgentEvent, source = "protocol") => setSessions((old) => applySessionEvent(old, event, Date.now(), source));
 
   useEffect(() => {
-    if (!isTauri()) return;
+    const desktop = desktopApi();
+    if (!desktop) return;
     let disposed = false;
     let stopSnapshots: (() => void) | undefined;
     let stopProtocol: (() => void) | undefined;
-    const replaceSnapshot = (payloads: unknown[]) => {
+    const sourceFor = (event: AgentEvent, fallback: string) => typeof event.meta?.source === "string" && event.meta.source ? event.meta.source : fallback;
+    const replaceSnapshot = (payloads: unknown, fallbackSource = "codex-desktop-fallback") => {
       if (disposed || !Array.isArray(payloads)) return;
       const events = payloads.map((payload) => genericJsonlAdapter.ingest(payload)).filter((event): event is AgentEvent => event !== null);
-      setSessions((old) => replaceSessionSource(old, "codex-desktop", events));
+      const grouped = new Map<string, AgentEvent[]>();
+      for (const event of events) {
+        const source = sourceFor(event, fallbackSource);
+        grouped.set(source, [...(grouped.get(source) ?? []), event]);
+      }
+      setSessions((old) => {
+        let next = old;
+        for (const [source, sourceEvents] of grouped) next = replaceSessionSource(next, source, sourceEvents);
+        return next;
+      });
       setSyncError("");
     };
     const connect = async () => {
       try {
-        stopSnapshots = await listen<unknown[]>("big-agent:sessions", (message) => replaceSnapshot(message.payload));
-        stopProtocol = await listen<unknown>("big-agent:event", (message) => {
-          const event = genericJsonlAdapter.ingest(message.payload) ?? codexAdapter.ingest(message.payload);
-          if (event) apply(event, "protocol");
+        stopSnapshots = desktop.onSessions(replaceSnapshot);
+        stopProtocol = desktop.onEvent((payload) => {
+          const event = genericJsonlAdapter.ingest(payload) ?? codexAdapter.ingest(payload);
+          if (event) apply(event, sourceFor(event, "protocol"));
         });
-        const payloads = await invoke<unknown[]>("codex_desktop_sessions");
+        const payloads = await desktop.getSessions();
         replaceSnapshot(payloads);
       } catch (error) {
         if (!disposed) setSyncError(error instanceof Error ? error.message : String(error));
@@ -384,14 +360,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isTauri()) return;
-    invoke("set_screen_awake", { active: liveAgents.length > 0 }).catch(() => undefined);
+    const desktop = desktopApi();
+    if (!desktop) return;
+    desktop.setScreenAwake(liveAgents.length > 0).catch(() => undefined);
   }, [liveAgents.length]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "f") toggleAppFullscreen().catch(() => undefined);
-      if (event.key === "Escape") { invoke("exit_fullscreen").catch(() => document.exitFullscreen?.()); setHelp(false); }
+      if (event.key === "Escape") { exitAppFullscreen().catch(() => undefined); setHelp(false); }
       if (event.key.toLowerCase() === "i") setInspection((value) => !value);
       if (event.key === "?") setHelp((value) => !value);
     };
@@ -399,22 +376,16 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const beginDrag = (event: React.MouseEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest("button, select")) return;
-    if (isTauri()) getCurrentWindow().startDragging().catch(() => undefined);
-  };
-
   const summary = liveWorkstreams.length > 0
     ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.length, "AGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
     : completedAgents.length > 0
       ? <CompletedHeaderSummary agents={completedAgents} />
       : "WAITING FOR AN AGENT";
-  const workstreamPersonalities = personalitiesForWorkstreams(boardWorkstreams);
 
   return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
-    <header data-tauri-drag-region onMouseDown={beginDrag}>
-      <div className="brand" data-tauri-drag-region><span className="brand-face">-_</span><b>BIG AGENT</b></div>
-      <div className="summary" data-tauri-drag-region>{summary}</div>
+    <header>
+      <div className="brand"><span className="brand-face">-_</span><b>BIG AGENT</b></div>
+      <div className="summary">{summary}</div>
       <div className="header-actions">
         <button className="fullscreen-toggle" onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Toggle fullscreen (F)">⛶</button>
         <button onClick={() => setInspection((value) => !value)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
@@ -422,10 +393,10 @@ function App() {
     </header>
 
     {boardWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={workstreamPersonalities.get(workstream.id) ?? 0} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.id)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : completedAgents.length > 0
         ? <CompletionSummary agents={completedAgents} privacy={privacy} />
-      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><FaceVisual status="idle" label="READY" seed={41} personality={3} attention={false} /></div></section>}
+      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><FaceVisual status="idle" phase="idle" label="READY" seed={41} personality={3} attention={false} /></div></section>}
 
     <footer>
       <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : boardWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>

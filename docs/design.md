@@ -8,7 +8,7 @@ BIG AGENT is ambient information, not a dashboard. At twelve feet, stable workst
 - A state is a verb: `THINKING`, `RUNNING TESTS`, `NEEDS YOU`, `DONE`.
 - Show only short agent-provided summaries and observable tools. Never present private chain-of-thought.
 - Attention states use amber/red and a restrained dot pulse. Normal work stays calm.
-- The tiny ASCII face reflects status automatically and is never the primary signal.
+- The animated face reflects status automatically and complements the primary text and color signals.
 - Keep the ambient activity roster concise. Put recency, plans, and longer history behind inspection.
 - Privacy mode replaces files, paths, commands, and details with generic activity.
 - Respect reduced-motion preferences.

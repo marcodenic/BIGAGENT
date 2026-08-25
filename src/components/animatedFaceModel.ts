@@ -1,4 +1,4 @@
-import type { AgentStatus } from "../core/protocol";
+import type { AgentPhase, AgentStatus } from "../core/protocol";
 
 export type AnimatedFaceShape = "blob" | "pebble" | "bean" | "egg" | "squircle" | "tablet" | "capsule" | "cylinder" | "hex" | "gem" | "crystal" | "wedge" | "shield" | "dome" | "arch" | "cloud" | "teardrop" | "leaf";
 export type AnimatedFaceColor = "black" | "brown" | "red" | "orange" | "yellow" | "green" | "cyan" | "blue" | "violet" | "magenta" | "gray";
@@ -20,9 +20,20 @@ export const OFFICIAL_GROK_COLORS: Record<AnimatedFaceColor, { from: string; to:
 };
 
 /** App events are only translated here; all motion remains inside the shipped engine. */
-export function animatedStateForStatus(status: AgentStatus, attention = false): AnimatedFaceState {
+export function animatedStateForStatus(status: AgentStatus, attention = false, phase?: AgentPhase): AnimatedFaceState {
   if (status === "error") return "alerting";
   if (status === "approval" || attention) return "listening";
+  switch (phase) {
+    case "starting": return "waking";
+    case "responding": return "dictating";
+    case "delegating": return "spawning";
+    case "retrying": return "loading";
+    case "receiving": return "receiving";
+    case "uploading": return "uploading";
+    case "notifying": return "notifying";
+    case "completing": return "celebrate";
+    case "failed": return "alerting";
+  }
   switch (status) {
     case "thinking": return "thinking";
     case "searching": return "searching";

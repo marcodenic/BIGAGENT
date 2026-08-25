@@ -36,11 +36,14 @@ header, footer {
 }
 
 header {
+  -webkit-app-region: drag;
   min-height: clamp(44px, 5.2vh, 68px);
   justify-content: space-between;
   border-bottom: 1px solid #292b27;
   cursor: grab;
 }
+
+header button, header select { -webkit-app-region: no-drag; }
 
 header:active { cursor: grabbing; }
 .brand { display: flex; align-items: center; gap: 14px; color: #ecebe5; }

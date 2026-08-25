@@ -1,11 +1,11 @@
-import type { AgentEvent, AgentStatus } from "./protocol";
+import type { AgentEvent, AgentPhase, AgentStatus } from "./protocol";
 
 export interface DisplayState {
   status: AgentStatus; label: string; detail: string; files: string[]; plan: string[]; recent: AgentEvent[];
   startedAt: number | null; stateSince: number; endedAt: number | null; attention: boolean; error: string | null;
-  sessionName: string; project: string; branch: string; command: string; tool: string; target: string; usage?: AgentEvent["usage"];
+  sessionName: string; project: string; branch: string; command: string; tool: string; target: string; phase: AgentPhase; usage?: AgentEvent["usage"];
 }
-export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "" };
+export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "", phase: "idle" };
 const labels: Record<AgentStatus, string> = { idle: "READY", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "RUNNING", editing: "EDITING", testing: "RUNNING TESTS", waiting: "NEEDS YOU", approval: "NEEDS YOU", complete: "DONE", error: "SOMETHING BROKE" };
 const active = new Set<AgentStatus>(["thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval"]);
 export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.now()): DisplayState {
@@ -23,8 +23,11 @@ export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.n
   if (event.command !== undefined) next.command = event.command;
   if (event.tool !== undefined) next.tool = event.tool;
   if (event.target !== undefined) next.target = event.target;
+  if (event.phase !== undefined) next.phase = event.phase;
   if (status !== state.status) next.stateSince = now;
   next.status = status;
+  if (status === "error") next.phase = "failed";
+  else if (status === "complete" && event.phase === undefined) next.phase = "completing";
   // A protocol producer may omit explicit session boundaries; the first active status still starts a useful timer.
   if (active.has(status)) { next.startedAt ??= now; next.endedAt = null; }
   next.label = event.label?.toUpperCase() || (status === "editing" && event.files?.length ? `EDITING ${event.files.length} FILES` : labels[status]);
