@@ -258,6 +258,9 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
   // status marker into an unreadable wall of text.
   const focus = message ?? reasoning ?? available[0];
   const context = available.find((step) => step.id !== focus?.id && (step.tool || step.target));
+  const contextDescription = context
+    ? context.target || (context.detail !== context.tool && context.detail !== focus?.detail ? context.detail : "COMMAND IN PROGRESS")
+    : "";
   // The prominent context row counts as the newest action. Keep enough compact
   // telemetry beneath it to make the previous three actions visible.
   const telemetryLimit = Math.min(context ? 2 : 3, Math.max(1, trailLimit));
@@ -272,7 +275,7 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
     </div>}
     {context && <div className="agent-context">
       {context.tool && <span className="agent-context-tool"><i aria-hidden="true">›</i><b>{context.tool}</b></span>}
-      {context.target && <em>{context.target}</em>}
+      {contextDescription && <em>{contextDescription}</em>}
     </div>}
     <AgentPlan plan={agent.state.plan} privacy={privacy} />
     {telemetry.map((step, depth) => <div key={step.id} className={`agent-step telemetry-step telemetry-depth-${depth} ${step.tool ? "has-tool" : "no-tool"} status-${step.status}`}>
