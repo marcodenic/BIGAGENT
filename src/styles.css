@@ -152,17 +152,17 @@ header button:hover { color: #efeee9; }
 .face {
   position: absolute;
   z-index: 1;
-  left: calc(var(--identity-width) / 2);
+  left: 0;
   top: 61%;
-  transform: translate(-50%, -50%);
-  width: 2.8ch;
+  transform: translateY(-50%);
+  width: var(--identity-width);
   overflow: visible;
   text-align: center;
   white-space: nowrap;
-  font: 300 clamp(46px, 5vw, 88px)/1 "Geist Mono Variable", monospace;
+  font: 300 clamp(58px, 6vw, 108px)/1 "Geist Mono Variable", monospace;
   letter-spacing: -.12em;
   color: #85887f;
-  opacity: .58;
+  opacity: .66;
   text-shadow: 0 0 20px #d8d8cf12;
   animation: face-breathe 4.8s ease-in-out infinite;
 }
@@ -292,7 +292,7 @@ header button:hover { color: #efeee9; }
 .board-count-1 .workstream { --identity-width: max(210px, 20vw); grid-template-columns: var(--identity-width) minmax(0, 1fr) auto; gap: clamp(30px, 4vw, 76px); }
 .board-count-1 .workstream-activity h1 { font-size: clamp(42px, 10.8cqw, 164px); }
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
-.board-count-1 .face { top: 59%; font-size: clamp(58px, 6vw, 106px); }
+.board-count-1 .face { top: 59%; font-size: clamp(72px, 7vw, 126px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
 .board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(24px, 2.7cqw, 46px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
@@ -309,7 +309,7 @@ header button:hover { color: #efeee9; }
 .layout-compact .workstream-activity h1 { margin-bottom: 6px; }
 .layout-compact .agent-step { min-height: clamp(18px, 2.3vh, 27px); }
 .layout-compact .agent-step:first-child { min-height: clamp(24px, 3vh, 34px); }
-.layout-compact .face { top: 68%; font-size: clamp(34px, 3.4vw, 56px); }
+.layout-compact .face { top: 68%; font-size: clamp(42px, 4.2vw, 68px); }
 
 /* Portrait displays have vertical room, so stop forcing the landscape's three
    major columns into a narrow strip. The timer/preview become a right rail. */
@@ -332,7 +332,7 @@ header button:hover { color: #efeee9; }
 .layout-portrait .agent-focus { min-height: clamp(48px, 4.8vh, 68px); font-size: clamp(20px, 3.3cqw, 34px); }
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
-.layout-portrait .face { left: clamp(72px, 11vw, 118px); top: 62%; font-size: clamp(44px, 7vw, 72px); }
+.layout-portrait .face { left: 0; top: 62%; width: clamp(144px, 22vw, 236px); font-size: clamp(52px, 8vw, 84px); }
 
 /* Respond to the feed's real width, not the overall window width. The identity
    and timer columns can leave this area compact even in a fairly wide window. */

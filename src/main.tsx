@@ -24,24 +24,49 @@ import {
 import "./styles.css";
 
 const faces: Record<AgentStatus, string[]> = {
-  idle: ["-_-"],
-  thinking: ["-_-", "._.", "-_-", "o_o"],
-  searching: [">_>", ">_>", "<_<"],
-  working: ["o_o", "-_-", "o_o", "..."],
-  command: [">_>", "._.", "<_<"],
-  editing: ["._.", "-_-", "._+"],
-  testing: ["?_?", "o_o", "?_?"],
-  waiting: ["?", "._.", "?"],
-  approval: ["?", "!_!", "?"],
-  complete: ["^_^"],
-  error: ["x_x", "X_X"],
+  idle: ["-_-", "._.", "u_u", "-.-", "=_="],
+  thinking: ["o_O", "O_o", "O_O", "o_o", "._.", "-_-", "@_@", "9_9"],
+  searching: [">_>", "<_<", ">_<", "o_O", "O_o", "0_0", "._>", "<_."],
+  working: ["o_o", "O_O", "o_O", "O_o", "._.", "-_-", "^_^", "u_u"],
+  command: [">_>", "<_<", "o_o", "O_o", "._.", "-_-", "=_="],
+  editing: ["._.", "o_o", "o_O", "O_o", "-_-", "^_^", "u_u", "=_="],
+  testing: ["?_?", "o_O", "O_o", "O_O", "0_0", ">_<", "@_@", "-_-"],
+  waiting: ["._.", "-_-", "u_u", "-.-", "=_=", "T_T", "o_o"],
+  approval: ["?_?", "O_O", "o_O", "O_o", "!_!", "0_0", "@_@"],
+  complete: ["^_^", "^o^", "n_n", "u_u", "=_=", "^.^"],
+  error: ["x_x", "X_X", "T_T", ">_<", "@_@", "!_!", ";_;"],
 };
 
-function faceFor(workstream: Workstream, now: number) {
-  const variants = faces[workstream.status];
-  const offset = [...workstream.id].reduce((total, character) => total + character.charCodeAt(0), 0);
-  const cadence = workstream.attention ? 3_000 : 6_000;
-  return variants[(Math.floor(now / cadence) + offset) % variants.length];
+function faceHash(value: string) {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function facesForWorkstreams(workstreams: Workstream[], now: number) {
+  const assigned = new Map<string, string>();
+  const visible = new Set<string>();
+  for (const workstream of workstreams) {
+    const variants = faces[workstream.status];
+    const hash = faceHash(workstream.id);
+    const cadence = workstream.attention ? 2_700 + hash % 900 : 5_200 + hash % 2_400;
+    const phase = Math.floor((now + hash % 11_000) / cadence);
+    const start = (hash + phase) % variants.length;
+    let expression = variants[start];
+    for (let step = 0; step < variants.length; step += 1) {
+      const candidate = variants[(start + step) % variants.length];
+      if (!visible.has(candidate)) {
+        expression = candidate;
+        break;
+      }
+    }
+    visible.add(expression);
+    assigned.set(workstream.id, expression);
+  }
+  return assigned;
 }
 
 const activityLabels: Record<AgentStatus, string> = {
@@ -230,10 +255,9 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
   </li>;
 }
 
-function WorkstreamRow({ workstream, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+function WorkstreamRow({ workstream, face, now, privacy, agentLimit, trailLimit }: { workstream: Workstream; face: string; now: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
-  const face = faceFor(workstream, now);
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
   return <article className={`workstream status-${workstream.status} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
@@ -356,6 +380,7 @@ function App() {
     : completedAgents.length > 0
       ? `${plural(completedAgents.length, "AGENT")} COMPLETED · LAST ${relativeTime(Math.max(...completedAgents.map((agent) => agent.state.endedAt ?? agent.updatedAt)), now)}`
       : "WAITING FOR AN AGENT";
+  const workstreamFaces = facesForWorkstreams(boardWorkstreams, now);
 
   return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header data-tauri-drag-region onMouseDown={beginDrag}>
@@ -365,7 +390,7 @@ function App() {
     </header>
 
     {boardWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} face={workstreamFaces.get(workstream.id) ?? "-_-"} now={now} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : completedAgents.length > 0
         ? <CompletionSummary agents={completedAgents} now={now} privacy={privacy} />
       : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><span>-_-</span></section>}
