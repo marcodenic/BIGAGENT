@@ -26,6 +26,15 @@ function text(...values: unknown[]) {
   return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
 }
 
+function planSteps(...values: unknown[]) {
+  const steps = values.flatMap(array).map((value) => {
+    if (typeof value === "string") return value.trim();
+    const item = object(value);
+    return text(item.content, item.step, item.title, item.description, item.text, item.label) ?? "";
+  }).filter(Boolean);
+  return steps.length ? [...new Set(steps)].slice(0, 6) : undefined;
+}
+
 function numberValue(...values: unknown[]) {
   return values.find((value): value is number => typeof value === "number" && Number.isFinite(value));
 }
@@ -313,7 +322,7 @@ function opencodeEvents(envelope: TelemetryEnvelope) {
     return [makeEvent(envelope, basePayload, "thinking", "activity", { ...common, phase: "planning", detail: "OpenCode is working" })];
   }
   if (/sessiondiff/.test(eventName)) return [makeEvent(envelope, basePayload, "editing", "files.changed", { ...common, phase: "editing", detail: "Updating files" })];
-  if (/todoupdated|plan/.test(eventName)) return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan" })];
+  if (/todoupdated|plan/.test(eventName)) return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(payload.plan, payload.steps, payload.items, info.plan, info.steps) })];
   if (/commandexecuted/.test(eventName)) return [makeEvent(envelope, basePayload, "command", "command.start", { ...common, phase: "executing", command: text(payload.command), detail: text(payload.command) || "Running a command" })];
   if (/messagepart/.test(eventName)) {
     const partType = key(part.type);
@@ -347,7 +356,7 @@ function acpEvents(envelope: TelemetryEnvelope) {
   if (/requestpermission/.test(key(method))) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", detail: "Permission required" })];
   if (method !== "session/update") return [];
   if (/agentmessagechunk|agentthoughtchunk/.test(updateType)) return [makeEvent(envelope, basePayload, updateType.includes("thought") ? "thinking" : "working", "activity", { ...common, phase: updateType.includes("thought") ? "planning" : "responding", label: updateType.includes("thought") ? "THINKING" : "RESPONDING", detail: updateType.includes("thought") ? "Reasoning" : "Writing a response" })];
-  if (/plan/.test(updateType)) return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan" })];
+  if (/plan/.test(updateType)) return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(update.plan, update.steps, update.items, params.plan, params.steps) })];
   if (/toolcall/.test(updateType)) {
     const toolName = text(update.title, update.name, update.kind);
     const status = key(update.status);
@@ -384,7 +393,7 @@ function codexEvents(envelope: TelemetryEnvelope) {
     const status = key(turn.status || params.status);
     return [makeEvent(envelope, basePayload, /fail|error|interrupt/.test(status) ? "error" : "complete", /fail|error|interrupt/.test(status) ? "error" : "complete", { ...common, phase: /fail|error|interrupt/.test(status) ? "failed" : "completing", detail: /fail|error|interrupt/.test(status) ? "Codex stopped with an error" : "Codex completed" })];
   }
-  if (/planupdated|plan/.test(eventType) || itemType === "plan") return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan" })];
+  if (/planupdated|plan/.test(eventType) || itemType === "plan") return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(item.plan, item.steps, item.items, params.plan, params.steps, root.plan) })];
   if (/agentmessagedelta|agentmessage/.test(eventType) || itemType === "agentmessage") return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail: "Writing a response" })];
   if (/reasoning/.test(eventType) || itemType === "reasoning") return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail: "Reasoning" })];
   if (/filechange|patch/.test(eventType) || itemType === "filechange") {

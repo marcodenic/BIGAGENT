@@ -44,6 +44,16 @@ function object(value: unknown): JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+function planSteps(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const steps = value.map((entry) => {
+    if (typeof entry === "string") return entry.trim();
+    const item = object(entry);
+    return text(item.content, text(item.step, text(item.title, text(item.description, text(item.text, text(item.label)))))).trim();
+  }).filter(Boolean);
+  return steps.length ? [...new Set(steps)].slice(0, 6) : undefined;
+}
+
 function parseJson(value: string): JsonObject {
   try {
     return object(JSON.parse(value));
@@ -281,8 +291,12 @@ function recordEvent(
   let command: string | undefined;
   let tool: string | undefined;
   let target: string | undefined;
+  let plan: string[] | undefined;
 
-  if (itemType === "reasoning") {
+  if (/plan|todo/i.test(itemType)) {
+    plan = planSteps(item.plan) ?? planSteps(item.steps) ?? planSteps(item.items);
+    detail = plan?.[0] || "Updating the plan";
+  } else if (itemType === "reasoning") {
     const summary = Array.isArray(item.summary) ? item.summary.map((value) => text(value)).find((value) => value.trim()) : "";
     detail = summary || fallbackDetail || "Planning the next step";
   } else if (itemType === "commandExecution") {
@@ -394,7 +408,7 @@ function recordEvent(
   const activityClass = itemType === "agentMessage" || hasReasoningSummary
     ? "narrative"
     : itemType === "imageView" || itemType === "imageGeneration" ? "visual" : "telemetry";
-  const kind = status === "complete" ? "complete" : status === "error" ? "error" : itemType === "reasoning" ? "reasoning.summary" : "activity";
+  const kind = status === "complete" ? "complete" : status === "error" ? "error" : /plan|todo/i.test(itemType) ? "plan" : itemType === "reasoning" ? "reasoning.summary" : "activity";
 
   return {
     version: 1,
@@ -406,6 +420,7 @@ function recordEvent(
     label,
     detail,
     files,
+    plan,
     command,
     tool,
     target,
@@ -488,6 +503,10 @@ export function codexDesktopSessions() {
         "SELECT item_type, item_json, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_type = 'imageView' ORDER BY updated_at_ordinal DESC LIMIT 1",
         turn.thread_id, turn.turn_id);
       if (latestImage && !records.some((record) => record.updated_at_ordinal === latestImage.updated_at_ordinal)) records.push(latestImage);
+      const latestPlan = queryOne<ItemRow>(historyDatabase,
+        "SELECT item_type, item_json, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? AND (lower(item_type) LIKE '%plan%' OR lower(item_type) LIKE '%todo%') ORDER BY updated_at_ordinal DESC LIMIT 1",
+        turn.thread_id, turn.turn_id);
+      if (latestPlan && !records.some((record) => record.updated_at_ordinal === latestPlan.updated_at_ordinal)) records.push(latestPlan);
       const narrativeRecords = queryAll<ItemRow>(historyDatabase, `
         WITH ranked AS (
           SELECT item_type, item_json, updated_at_ordinal,

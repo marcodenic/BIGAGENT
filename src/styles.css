@@ -20,7 +20,8 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  padding: clamp(12px, min(2.8vw, 3.4vh), 48px);
+  /* The display needs a wide side gutter, not a wide top and bottom moat. */
+  padding: clamp(10px, .8vw, 16px) clamp(12px, min(2.8vw, 3.4vh), 48px);
   background: #070806;
   position: relative;
 }
@@ -37,7 +38,7 @@ header, footer {
 
 header {
   -webkit-app-region: drag;
-  min-height: clamp(44px, 5.2vh, 68px);
+  min-height: clamp(34px, 3.6vh, 48px);
   justify-content: space-between;
   border-bottom: 1px solid #292b27;
   cursor: grab;
@@ -115,7 +116,18 @@ header button:hover { color: #efeee9; }
   font: normal 500 clamp(12px, 1vw, 18px) "Geist Mono Variable", monospace;
   box-shadow: 0 0 18px #c8e94314;
 }
-.provider-icons img { width: 62%; height: 62%; filter: invert(89%) sepia(66%) saturate(664%) hue-rotate(24deg) brightness(98%) contrast(88%); }
+.provider-logo {
+  width: 62%;
+  height: 62%;
+  display: grid;
+  place-items: center;
+}
+.provider-logo svg { width: 100%; height: 100%; display: block; fill: currentColor; }
+.provider-openai { color: #f1f1ec !important; border-color: #565951 !important; }
+.provider-claude { color: #d97757 !important; border-color: #6f493a !important; }
+.provider-gemini { color: #8ab4f8 !important; border-color: #3f5f91 !important; }
+.provider-qwen { color: #70a3ff !important; border-color: #3f5e91 !important; }
+.provider-meta { color: #5d8cff !important; border-color: #3a5798 !important; }
 .provider-icons i + i { margin-left: -9px; }
 .model-identity small {
   min-width: 0;
@@ -172,16 +184,15 @@ header button:hover { color: #efeee9; }
 .needs-attention .official-grok-face { animation: none; filter: none; }
 .status-error .matrix-light.level-2 { fill: #dfb0aa; }
 .status-complete .matrix-light.level-2 { fill: #c6d4cb; }
-.workstream-activity h1 {
+.state-label {
   width: 100%;
   box-sizing: border-box;
-  margin: 0 0 clamp(4px, .8vh, 12px);
+  margin: 0 0 clamp(5px, .9vh, 14px);
   padding-bottom: .13em;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
   white-space: nowrap;
   color: var(--status-color);
-  font-size: clamp(38px, 5vw, 92px);
+  font-size: clamp(2.4rem, min(10.8cqi, 10vmin), 10.25rem);
   font-weight: 500;
   line-height: .9;
   letter-spacing: -.072em;
@@ -223,18 +234,26 @@ header button:hover { color: #efeee9; }
   min-height: clamp(46px, 5.5vh, 70px);
   display: grid;
   grid-template-columns: 10px 36px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: clamp(8px, .9vw, 16px);
   padding-block: clamp(5px, .7vh, 10px);
   font: 400 clamp(20px, 2.25cqw, 38px)/1.08 "Geist Variable", system-ui, sans-serif;
   letter-spacing: -.035em;
 }
+.agent-focus > .agent-pulse, .agent-focus > .agent-number { margin-top: .3em; }
 .agent-focus .agent-number {
   font: 300 .58em/1 "Geist Mono Variable", monospace;
   letter-spacing: -.04em;
   white-space: nowrap;
 }
-.agent-focus > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e6e5de; }
+.agent-focus-copy {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #f0efe9;
+}
 .agent-commentary {
   min-width: 0;
   min-height: clamp(28px, 3.5vh, 44px);
@@ -247,9 +266,44 @@ header button:hover { color: #efeee9; }
 }
 .agent-commentary i { grid-column: 1; color: #70736a; font-style: normal; text-align: center; }
 .agent-commentary span { grid-column: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.telemetry-step { opacity: .58; }
-.telemetry-depth-1 { opacity: .42; }
-.telemetry-depth-2 { opacity: .27; }
+.agent-context {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 10px 36px minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: clamp(8px, .9vw, 16px);
+  padding: 0 0 clamp(6px, .8vh, 10px);
+  color: #85887e;
+  font: 400 clamp(9px, .8cqi, 13px)/1.2 "Geist Mono Variable", monospace;
+  letter-spacing: -.025em;
+}
+.agent-context-tool { grid-column: 3; display: inline-flex; min-width: 0; align-items: baseline; gap: .45em; }
+.agent-context-tool i { color: var(--status-color); font-style: normal; }
+.agent-context b { color: #cbccc5; font-weight: 400; }
+.agent-context em { grid-column: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #73766d; font-style: normal; white-space: nowrap; }
+.agent-plan {
+  min-width: 0;
+  display: grid;
+  align-items: start;
+  padding: clamp(7px, .9vh, 12px) 0 clamp(3px, .45vh, 7px);
+  border-top: 1px solid #2d302a;
+}
+.agent-plan > ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(18ch, 100%), 1fr));
+  gap: clamp(8px, 1.4cqi, 22px);
+  min-width: 0;
+}
+.agent-plan li { min-width: 0; display: grid; grid-template-columns: 1.7em minmax(0, 1fr); gap: .55em; align-items: center; color: #93968c; font: 400 clamp(10px, .9cqi, 15px)/1.18 "Geist Mono Variable", monospace; }
+.agent-plan li i { width: 1.55em; height: 1.55em; display: grid; place-items: center; border: 1px solid #5f635a; border-radius: 50%; color: #a5a89e; font-size: .78em; font-style: normal; }
+.agent-plan li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-plan li[data-state="current"] { color: #e0e1d9; }
+.agent-plan li[data-state="current"] i { border-color: var(--status-color); background: var(--status-color); color: #10120d; box-shadow: 0 0 16px color-mix(in srgb, var(--status-color) 45%, transparent); }
+.agent-plan li[data-state="complete"] { color: #7c8f80; }
+.agent-plan li[data-state="complete"] i { border-color: var(--complete); color: var(--complete); }
+.telemetry-step { opacity: .88; }
+.telemetry-depth-1 { opacity: .68; }
+.telemetry-depth-2 { opacity: .5; }
 .extra-agents { margin: 9px 0 0 43px; font: 400 9px "Geist Mono Variable", monospace; letter-spacing: .11em; color: #73766d; }
 
 .workstream time {
@@ -298,26 +352,76 @@ header button:hover { color: #efeee9; }
 .workstream.status-complete time { color: var(--complete); }
 
 .board-count-1 .workstream { --identity-width: max(210px, 20vw); grid-template-columns: var(--identity-width) minmax(0, 1fr) auto; gap: clamp(30px, 4vw, 76px); }
-.board-count-1 .workstream-activity h1 { font-size: clamp(42px, 10.8cqw, 164px); }
+.board-count-1 .state-label { font-size: clamp(2.6rem, min(10.8cqi, 17vmin), 10.25rem); }
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
 .board-count-1 .matrix-face { top: 59%; width: min(calc(var(--identity-width) * .94), 315px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
-.board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(24px, 2.7cqw, 46px); }
+.board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(28px, 3.1cqw, 54px); }
+.board-count-1 .agent-context { padding-bottom: clamp(10px, 1.1vh, 16px); font-size: clamp(18px, 1.8cqi, 30px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
-.board-count-2 .agent-focus { min-height: clamp(44px, 5vh, 62px); }
-.board-count-2 .workstream-activity h1 { font-size: clamp(54px, 6.5vw, 112px); }
-.board-count-3 .workstream-activity h1 { font-size: clamp(44px, 5.4vw, 92px); }
-.board-count-4 .workstream-activity h1, .board-count-5 .workstream-activity h1 { font-size: clamp(35px, 4.3vw, 76px); margin-bottom: 8px; }
+.board-count-2 .agent-focus { min-height: clamp(52px, 5.8vh, 74px); font-size: clamp(24px, 2.5cqw, 40px); }
+.board-count-2 .agent-context { padding-bottom: clamp(8px, .9vh, 13px); font-size: clamp(17px, 1.5cqi, 26px); }
+.board-count-2 .state-label { font-size: clamp(2.4rem, min(9cqi, 12vmin), 7rem); }
+.board-count-1 .agent-focus-copy, .board-count-2 .agent-focus-copy,
+.board-count-1 .agent-commentary span, .board-count-2 .agent-commentary span,
+.board-count-1 .agent-plan li span, .board-count-2 .agent-plan li span {
+  text-wrap: pretty;
+}
+.board-count-1 .agent-plan li, .board-count-2 .agent-plan li { align-items: start; }
+.board-count-3 .state-label { font-size: clamp(2.2rem, min(7.2cqi, 9vmin), 5.75rem); }
+.board-count-4 .state-label, .board-count-5 .state-label { font-size: clamp(2rem, min(5.8cqi, 7.6vmin), 4.75rem); margin-bottom: 8px; }
 .board-count-4 .workstream, .board-count-5 .workstream { padding: 12px 0; }
 .board-count-3 .agent-preview, .board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-max-width: clamp(110px, 12vw, 210px); }
 .board-count-3 .agent-preview { --preview-height: min(9vh, 90px); }
 .board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-height: min(6vh, 62px); }
 .board-count-4 .agent-preview figcaption, .board-count-5 .agent-preview figcaption { display: none; }
 .layout-compact .workstream { padding: clamp(7px, 1.4vh, 16px) 0; }
-.layout-compact .workstream-activity h1 { margin-bottom: 6px; }
+.layout-compact .state-label { margin-bottom: 6px; }
 .layout-compact .agent-step { min-height: clamp(18px, 2.3vh, 27px); }
 .layout-compact .agent-step:first-child { min-height: clamp(24px, 3vh, 34px); }
 .layout-compact .matrix-face { top: 68%; width: min(calc(var(--identity-width) * .74), 205px); }
+
+/* Once more than five live agents need attention, each gets an equal tile.
+   The current state and animated face remain visible; the active plan step is
+   retained while supporting detail yields to density. */
+.agent-tile-board .workstream-board { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #292b27; }
+.board-count-6 .workstream-board { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.board-count-7 .workstream-board, .board-count-8 .workstream-board, .board-count-9 .workstream-board { grid-template-rows: repeat(3, minmax(0, 1fr)); }
+.agent-tile-board .workstream {
+  --identity-width: clamp(74px, 7.5vw, 128px);
+  grid-template-columns: var(--identity-width) minmax(0, 1fr);
+  gap: clamp(12px, 1.4vw, 24px);
+  padding: clamp(11px, 1.4vh, 21px);
+  border: 0;
+  background: #070806;
+}
+.agent-tile-board .workstream-identity h2 { font-size: clamp(12px, 1.05vw, 18px); }
+.agent-tile-board .project-heading { gap: 5px; }
+.agent-tile-board .project-heading > span { font-size: clamp(9px, .8vw, 13px); }
+.agent-tile-board .identity-meta { margin-top: 6px; gap: 6px; }
+.agent-tile-board .workstream-dots { gap: 5px; }
+.agent-tile-board .state-dot { width: 6px; height: 6px; }
+.agent-tile-board .provider-icons i { width: 20px; height: 20px; }
+.agent-tile-board .provider-icons i + i { margin-left: -6px; }
+.agent-tile-board .model-identity small { display: none; }
+.agent-tile-board .matrix-face { top: 38.5%; width: min(calc(var(--identity-width) * .85), 112px); }
+.agent-tile-board .workstream-visual { position: absolute; top: clamp(11px, 1.4vh, 21px); right: clamp(11px, 1.4vw, 21px); display: block; min-width: 0; }
+.agent-tile-board .workstream time { padding: 0; font-size: clamp(14px, 1.45vw, 25px); }
+.agent-tile-board .agent-preview { display: none; }
+.agent-tile-board .state-label { margin-bottom: clamp(4px, .6vh, 8px); padding-right: 5.3em; font-size: clamp(1.85rem, min(6.5cqi, 5.8vmin), 4rem); }
+.agent-tile-board .agent-line { font-size: clamp(10px, .85vw, 14px); }
+.agent-tile-board .agent-focus { grid-template-columns: 7px 24px minmax(0, 1fr); gap: 8px; min-height: 0; padding-block: 3px 6px; font-size: clamp(18px, 1.55vw, 28px); }
+.agent-tile-board .agent-pulse { width: 6px; height: 6px; }
+.agent-tile-board .agent-commentary, .agent-tile-board .agent-step { display: none; }
+.agent-tile-board .agent-context { grid-template-columns: 7px 24px minmax(0, 1fr); column-gap: 8px; padding: 0 0 8px; font-size: clamp(11px, .95vw, 15px); }
+.agent-tile-board .agent-plan { padding: 6px 0 0; }
+.agent-tile-board .agent-plan > ol { display: block; }
+.agent-tile-board .agent-plan li { display: none; font-size: clamp(9px, .75vw, 12px); }
+.agent-tile-board .agent-plan li[data-state="current"] { display: grid; }
+
+@media (max-width: 980px) {
+  .agent-tile-board .workstream-board { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(auto-fit, minmax(0, 1fr)); }
+}
 
 /* Portrait displays have vertical room, so stop forcing the landscape's three
    major columns into a narrow strip. The timer/preview become a right rail. */
@@ -331,10 +435,7 @@ header button:hover { color: #efeee9; }
 .layout-portrait .workstream-identity { grid-column: 1; grid-row: 1; align-self: start; }
 .layout-portrait .workstream-activity { grid-column: 1; grid-row: 2; align-self: center; }
 .layout-portrait .workstream-visual { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
-.layout-portrait .workstream-activity h1 {
-  font-size: clamp(44px, 10cqw, 92px);
-  text-overflow: clip;
-}
+.layout-portrait .state-label { font-size: clamp(2.2rem, min(10cqi, 10vmin), 5.75rem); }
 .layout-portrait .workstream-identity h2 { font-size: clamp(20px, 3.2vw, 34px); }
 .layout-portrait .agent-line { font-size: clamp(11px, 1.65vw, 17px); }
 .layout-portrait .agent-focus { min-height: clamp(48px, 4.8vh, 68px); font-size: clamp(20px, 3.3cqw, 34px); }
@@ -351,6 +452,9 @@ header button:hover { color: #efeee9; }
   }
   .agent-tool, .agent-target { display: none; }
   .agent-detail, .agent-step.no-tool .agent-detail { grid-column: 4; }
+  .agent-plan { grid-template-columns: 1fr; gap: 7px; }
+  .agent-plan > ol { grid-template-columns: 1fr; gap: 6px; }
+  .agent-context { grid-template-columns: 9px 24px minmax(0, 1fr); gap: clamp(7px, 1.4cqw, 11px); }
 }
 
 .completion-summary {
@@ -386,8 +490,7 @@ header button:hover { color: #efeee9; }
 .completion-title h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 clamp(15px, 1.25vw, 22px) "Geist Mono Variable", monospace; letter-spacing: -.04em; text-transform: uppercase; color: #e8e7df; }
 .completion-title > div > span { display: block; margin-top: 5px; font: 400 clamp(8px, .62vw, 10px) "Geist Mono Variable", monospace; letter-spacing: .1em; text-transform: uppercase; color: #72756c; }
 .completion-title .model-identity small { display: none; }
-.completion-title .provider-icons i { width: clamp(24px, 1.8vw, 31px); height: clamp(24px, 1.8vw, 31px); color: var(--complete); }
-.completion-title .provider-icons img { filter: invert(62%) sepia(23%) saturate(603%) hue-rotate(101deg) brightness(94%) contrast(87%); }
+.completion-title .provider-icons i { width: clamp(24px, 1.8vw, 31px); height: clamp(24px, 1.8vw, 31px); }
 .completion-summary li > p { min-height: 2.8em; margin: clamp(14px, 1.7vh, 22px) 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font: 300 clamp(11px, .9vw, 15px)/1.4 "Geist Mono Variable", monospace; color: #b6b8af; }
 .completion-meta { display: flex; justify-content: space-between; gap: 14px; font: 400 clamp(8px, .62vw, 10px) "Geist Mono Variable", monospace; letter-spacing: .08em; color: #72756c; text-transform: uppercase; }
 .completion-meta time { color: var(--complete); }
@@ -398,7 +501,7 @@ header button:hover { color: #efeee9; }
 .empty-state p { margin: clamp(24px, 4vh, 50px) 0 0; font: 300 clamp(13px, 1.4vw, 22px) "Geist Mono Variable", monospace; color: #8b8e84; }
 .empty-face { width: clamp(150px, 18vw, 270px); margin-top: clamp(35px, 6vh, 80px); }
 
-footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; border-top: 1px solid #292b27; }
+footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; border-top: 1px solid #292b27; }
 .sync-error { color: var(--error); }
 .controls { display: flex; gap: 18px; opacity: 0; transition: opacity .18s; }
 .app:hover .controls { opacity: 1; }
@@ -456,11 +559,11 @@ footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; b
   .provider-icons i { width: 21px; height: 21px; }
   .matrix-face { display: none; }
   .model-identity small { font-size: 7px; }
-  .board-count-1 .workstream-activity h1,
-  .board-count-2 .workstream-activity h1,
-  .board-count-3 .workstream-activity h1,
-  .board-count-4 .workstream-activity h1,
-  .board-count-5 .workstream-activity h1 { font-size: clamp(34px, 14vw, 72px); }
+  .board-count-1 .state-label,
+  .board-count-2 .state-label,
+  .board-count-3 .state-label,
+  .board-count-4 .state-label,
+  .board-count-5 .state-label { font-size: clamp(2.1rem, 14vw, 4.5rem); }
   .agent-step { grid-template-columns: 8px 22px minmax(65px, auto) minmax(0, 1fr); font-size: 9px; }
   .agent-tool, .agent-target { display: none; }
   .inspection { width: calc(100vw - 40px); right: 20px; top: 68px; bottom: 58px; }
@@ -478,7 +581,7 @@ footer { min-height: clamp(30px, 4.4vh, 52px); justify-content: space-between; b
   header { min-height: 34px; }
   footer { min-height: 26px; }
   .workstream { padding: 6px 0; }
-  .workstream-activity h1 { font-size: clamp(30px, min(6.5vw, 12vh), 68px); margin-bottom: 4px; }
+  .state-label { font-size: clamp(1.9rem, min(6.5vw, 12vh), 4.25rem); margin-bottom: 4px; }
   .workstream-identity h2 { font-size: clamp(12px, min(1.7vw, 3.8vh), 22px); }
   .identity-meta { margin-top: 6px; }
   .matrix-face { width: min(calc(var(--identity-width) * .56), 142px); }

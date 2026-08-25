@@ -1,15 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { FaceVisual } from "./components/FaceVisual";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
 import { desktopApi, exitAppFullscreen, toggleAppFullscreen } from "./desktop";
 import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
-import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg";
-import claudeIcon from "@lobehub/icons-static-svg/icons/claude.svg";
-import geminiIcon from "@lobehub/icons-static-svg/icons/gemini.svg";
-import qwenIcon from "@lobehub/icons-static-svg/icons/qwen.svg";
-import metaIcon from "@lobehub/icons-static-svg/icons/meta.svg";
+import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg?raw";
+import claudeIcon from "@lobehub/icons-static-svg/icons/claude.svg?raw";
+import geminiIcon from "@lobehub/icons-static-svg/icons/gemini.svg?raw";
+import qwenIcon from "@lobehub/icons-static-svg/icons/qwen.svg?raw";
+import metaIcon from "@lobehub/icons-static-svg/icons/meta.svg?raw";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import {
@@ -120,11 +120,11 @@ function plural(count: number, one: string, many = `${one}S`) {
 
 function providerIcon(provider: string, model: string) {
   const identity = `${provider} ${model}`.toLowerCase();
-  if (identity.includes("anthropic") || identity.includes("claude")) return { src: claudeIcon, name: "Claude" };
-  if (identity.includes("openai") || identity.includes("gpt") || identity.includes("o1") || identity.includes("o3")) return { src: openaiIcon, name: "OpenAI" };
-  if (identity.includes("google") || identity.includes("gemini")) return { src: geminiIcon, name: "Google Gemini" };
-  if (identity.includes("qwen") || identity.includes("alibaba")) return { src: qwenIcon, name: "Qwen" };
-  if (identity.includes("meta") || identity.includes("llama")) return { src: metaIcon, name: "Meta" };
+  if (identity.includes("anthropic") || identity.includes("claude")) return { src: claudeIcon, name: "Claude", brand: "claude" };
+  if (identity.includes("openai") || identity.includes("gpt") || identity.includes("o1") || identity.includes("o3")) return { src: openaiIcon, name: "OpenAI", brand: "openai" };
+  if (identity.includes("google") || identity.includes("gemini")) return { src: geminiIcon, name: "Google Gemini", brand: "gemini" };
+  if (identity.includes("qwen") || identity.includes("alibaba")) return { src: qwenIcon, name: "Qwen", brand: "qwen" };
+  if (identity.includes("meta") || identity.includes("llama")) return { src: metaIcon, name: "Meta", brand: "meta" };
   return null;
 }
 
@@ -144,7 +144,9 @@ function ModelIdentity({ agents }: { agents: AgentSession[] }) {
   return <span className="model-identity" title={full}>
     <span className="provider-icons">{configurations.slice(0, 3).map((agent) => {
       const icon = providerIcon(agent.modelProvider, agent.model);
-      return <i key={`${agent.modelProvider}-${agent.model}-${agent.effort}`} aria-label={icon?.name ?? agent.modelProvider}>{icon ? <img src={icon.src} alt="" /> : "◇"}</i>;
+      return <i key={`${agent.modelProvider}-${agent.model}-${agent.effort}`} className={icon ? `provider-icon provider-${icon.brand}` : "provider-icon"} aria-label={icon?.name ?? agent.modelProvider}>
+        {icon ? <span className="provider-logo" dangerouslySetInnerHTML={{ __html: icon.src }} /> : "◇"}
+      </i>;
     })}</span>
     <small>{label}{configurations.length > 1 ? ` +${configurations.length - 1}` : ""}</small>
   </span>;
@@ -172,6 +174,51 @@ function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
         : null;
     return [{ id: event.id, status, label, tool, detail, target, narrativeKind }];
   }).slice(0, limit);
+}
+
+function planStepState(step: string, index: number) {
+  if (/^\s*(?:\[x\]|✓|done\b|complete\b)/i.test(step)) return "complete";
+  if (/^\s*(?:\[-\]|\[~\]|in progress\b|working\b)/i.test(step)) return "current";
+  return index === 0 ? "current" : "upcoming";
+}
+
+function planStepText(step: string) {
+  return displayText(step.replace(/^\s*(?:\[[xX ~-]\]|✓|done\s*[:.-]?|complete\s*[:.-]?|in progress\s*[:.-]?)\s*/i, ""), "Plan step");
+}
+
+function AgentPlan({ plan, privacy }: { plan: string[]; privacy: boolean }) {
+  if (!plan.length) return null;
+  const steps = plan.slice(0, 3);
+  return <section className="agent-plan" aria-label="Current plan">
+    <ol>{steps.map((step, index) => {
+      const state = planStepState(step, index);
+      return <li key={`${step}-${index}`} data-state={state}>
+        <i aria-hidden="true">{state === "complete" ? "✓" : index + 1}</i>
+        <span>{privacy ? "Plan step hidden" : planStepText(step)}</span>
+      </li>;
+    })}</ol>
+  </section>;
+}
+
+function FittedStateLabel({ label }: { label: string }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => {
+    const element = heading.current;
+    if (!element) return;
+    const fit = () => {
+      element.style.removeProperty("font-size");
+      const available = element.clientWidth;
+      const preferred = Number.parseFloat(window.getComputedStyle(element).fontSize);
+      const required = element.scrollWidth;
+      if (!available || !preferred || required <= available) return;
+      element.style.fontSize = `${Math.max(16, Math.floor(preferred * (available / required) * .98))}px`;
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element.parentElement ?? element);
+    fit();
+    return () => observer.disconnect();
+  }, [label]);
+  return <h1 ref={heading} className="state-label">{label}</h1>;
 }
 
 function latestImagePath(agent: AgentSession) {
@@ -207,18 +254,27 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
   const available = activitySteps(agent, privacy, 80);
   const reasoning = available.find((step) => step.narrativeKind === "reasoning");
   const message = available.find((step) => step.narrativeKind === "message");
-  const focus = reasoning ?? message ?? available[0];
-  const commentary = message?.id !== focus?.id ? message : undefined;
+  // Keep this a single room-scale detail: a second prose block turns one
+  // status marker into an unreadable wall of text.
+  const focus = message ?? reasoning ?? available[0];
+  const context = available.find((step) => step.id !== focus?.id && (step.tool || step.target));
+  // The prominent context row counts as the newest action. Keep enough compact
+  // telemetry beneath it to make the previous three actions visible.
+  const telemetryLimit = Math.min(context ? 2 : 3, Math.max(1, trailLimit));
   const telemetry = available
-    .filter((step) => step.narrativeKind === null && step.id !== focus?.id)
-    .slice(0, Math.min(3, Math.max(1, trailLimit)));
+    .filter((step) => step.narrativeKind === null && step.id !== focus?.id && step.id !== context?.id)
+    .slice(0, telemetryLimit);
   return <li className={`agent-line status-${agent.state.status}`}>
     {focus && <div className={`agent-focus status-${focus.status}`}>
       <i className="agent-pulse" aria-hidden="true" />
       <span className="agent-number">{String(index + 1).padStart(2, "0")}</span>
-      <span>{focus.detail}</span>
+      <span className="agent-focus-copy">{focus.detail}</span>
     </div>}
-    {commentary && <div className="agent-commentary"><i aria-hidden="true">·</i><span>{commentary.detail}</span></div>}
+    {context && <div className="agent-context">
+      {context.tool && <span className="agent-context-tool"><i aria-hidden="true">›</i><b>{context.tool}</b></span>}
+      {context.target && <em>{context.target}</em>}
+    </div>}
+    <AgentPlan plan={agent.state.plan} privacy={privacy} />
     {telemetry.map((step, depth) => <div key={step.id} className={`agent-step telemetry-step telemetry-depth-${depth} ${step.tool ? "has-tool" : "no-tool"} status-${step.status}`}>
       <i className="history-mark" aria-hidden="true">·</i>
       <span className="agent-number" />
@@ -262,7 +318,7 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
     </div>
     <FaceVisual status={workstream.status} phase={workstream.phase} label={workstream.label} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
     <div className="workstream-activity">
-      <h1>{workstream.label}</h1>
+      <FittedStateLabel label={workstream.label} />
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
       {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
     </div>
@@ -310,7 +366,12 @@ function App() {
     if (live.length) return [{ ...workstream, agents: live }];
     return workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000 ? [workstream] : [];
   }) : [];
-  const rowBudget = (viewport.height - Math.max(76, viewport.height * .14)) / Math.max(1, boardWorkstreams.length);
+  const boardAgents = boardWorkstreams.flatMap((workstream) => workstream.agents);
+  const useAgentTiles = boardAgents.length > 5;
+  const displayWorkstreams = useAgentTiles
+    ? boardWorkstreams.flatMap((workstream) => workstream.agents.map((agent) => ({ ...workstream, id: `${workstream.id}:${agent.id}`, agents: [agent] }))).slice(0, 9)
+    : boardWorkstreams;
+  const rowBudget = (viewport.height - Math.max(76, viewport.height * .14)) / Math.max(1, useAgentTiles ? Math.ceil(displayWorkstreams.length / 3) : displayWorkstreams.length);
   const trailLimit = rowBudget >= 300 ? 5 : rowBudget >= 235 ? 4 : rowBudget >= 175 ? 3 : rowBudget >= 125 ? 2 : 1;
   const agentLimit = viewport.width < 700 ? 1 : rowBudget >= 300 ? 4 : rowBudget >= 220 ? 3 : rowBudget >= 155 ? 2 : 1;
 
@@ -382,7 +443,7 @@ function App() {
       ? <CompletedHeaderSummary agents={completedAgents} />
       : "WAITING FOR AN AGENT";
 
-  return <main className={`app board-count-${Math.min(Math.max(boardWorkstreams.length, 1), 5)} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
+  return <main className={`app board-count-${Math.min(Math.max(displayWorkstreams.length, 1), 9)} ${useAgentTiles ? "agent-tile-board" : ""} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header>
       <div className="brand"><span className="brand-face">-_</span><b>BIG AGENT</b></div>
       <div className="summary">{summary}</div>
@@ -392,14 +453,14 @@ function App() {
       </div>
     </header>
 
-    {boardWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{boardWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.id)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+    {displayWorkstreams.length > 0
+      ? <section className="workstream-board" aria-live="polite">{displayWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.id)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : completedAgents.length > 0
         ? <CompletionSummary agents={completedAgents} privacy={privacy} />
       : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><FaceVisual status="idle" phase="idle" label="READY" seed={41} personality={3} attention={false} /></div></section>}
 
     <footer>
-      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : boardWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>
+      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : displayWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>
       <div className="controls">
         <button onClick={() => setPrivacy((value) => !value)}>{privacy ? "PRIVATE" : "OPEN"}</button>
       </div>

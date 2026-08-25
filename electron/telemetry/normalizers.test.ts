@@ -51,6 +51,15 @@ describe("telemetry normalization", () => {
     expect(opencode.status).toBe("approval");
   });
 
+  it("preserves public plan steps from Codex app-server updates", () => {
+    const [event] = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item.plan_updated",
+      params: { threadId: "thread-1", item: { type: "plan", steps: [{ content: "Inspect the source" }, { title: "Render the plan" }] } },
+    }, "codex-app-server"));
+    expect(event.kind).toBe("plan");
+    expect(event.plan).toEqual(["Inspect the source", "Render the plan"]);
+  });
+
   it("deduplicates retransmitted events and reports source health", () => {
     const hub = new TelemetryHub();
     const input = envelope("protocol", {
