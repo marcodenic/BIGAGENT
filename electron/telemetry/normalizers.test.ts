@@ -125,7 +125,82 @@ describe("telemetry normalization", () => {
       stop_hook_active: true,
     }, "codex-hooks"));
     expect(first.id).not.toBe(continued.id);
-    expect(continued).toMatchObject({ kind: "turn.end", status: "idle" });
+    expect(continued).toMatchObject({ kind: "activity", status: "working" });
+  });
+
+  it("uses Cursor agent thoughts and responses as public narrative", () => {
+    const [thought] = normalizeTelemetry(envelope("hook", {
+      hook_event_name: "afterAgentThought",
+      session_id: "cursor-1",
+      text: "Checking the lifecycle state before rendering",
+    }, "cursor-hooks"));
+    const [response] = normalizeTelemetry(envelope("hook", {
+      hook_event_name: "afterAgentResponse",
+      session_id: "cursor-1",
+      text: "The provider feed is connected",
+    }, "cursor-hooks"));
+
+    expect(thought).toMatchObject({
+      phase: "planning",
+      detail: "Checking the lifecycle state before rendering",
+      meta: { activityClass: "narrative", narrativeKind: "reasoning" },
+    });
+    expect(response).toMatchObject({
+      phase: "responding",
+      detail: "The provider feed is connected",
+      meta: { activityClass: "narrative", narrativeKind: "message" },
+    });
+  });
+
+  it("uses Gemini AfterAgent output as narrative and a turn boundary", () => {
+    const events = normalizeTelemetry(envelope("hook", {
+      hook_event_name: "AfterAgent",
+      session_id: "gemini-1",
+      prompt_id: "prompt-1",
+      prompt_response: "Verified the official Gemini hook feed",
+    }, "gemini-hooks"));
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      kind: "activity",
+      detail: "Verified the official Gemini hook feed",
+      meta: { sessionId: "gemini-1", turnId: "prompt-1", narrativeKind: "message" },
+    });
+    expect(events[1]).toMatchObject({ kind: "turn.end", status: "idle" });
+  });
+
+  it("extracts Windsurf planner narrative without collecting the transcript", () => {
+    const events = normalizeTelemetry(envelope("hook", {
+      agent_action_name: "post_cascade_response",
+      trajectory_id: "cascade-1",
+      execution_id: "execution-1",
+      tool_info: {
+        response: "### Planner Response\nInspecting the provider lifecycle\n\n### Other\nprivate tool details",
+      },
+    }, "windsurf-hooks"));
+
+    expect(events[0]).toMatchObject({
+      detail: "Inspecting the provider lifecycle",
+      meta: { sessionId: "cascade-1", turnId: "execution-1", narrativeKind: "message" },
+    });
+    expect(events[1]).toMatchObject({ kind: "turn.end", status: "idle" });
+    expect(JSON.stringify(events)).not.toContain("private tool details");
+  });
+
+  it("waits for Grok's idle notification when a stop hook may continue", () => {
+    const [continued] = normalizeTelemetry(envelope("hook", {
+      hook_event_name: "Stop",
+      session_id: "grok-1",
+      stop_hook_active: true,
+    }, "grok-hooks"));
+    const [idle] = normalizeTelemetry(envelope("hook", {
+      hook_event_name: "Notification",
+      session_id: "grok-1",
+      notification_type: "idle_prompt",
+    }, "grok-hooks"));
+
+    expect(continued).toMatchObject({ kind: "activity", status: "working" });
+    expect(idle).toMatchObject({ kind: "turn.end", status: "idle" });
   });
 
   it("preserves the command nested in Codex tool input", () => {
@@ -182,6 +257,34 @@ describe("telemetry normalization", () => {
     expect(opencode.status).toBe("approval");
   });
 
+  it("uses OpenCode output parts as narrative and preserves child session ownership", () => {
+    const [child] = normalizeTelemetry(envelope("opencode", {
+      type: "session.created",
+      cwd: "/workspace/project",
+      properties: { info: { id: "open-child", parentID: "open-parent", directory: "/workspace/project", title: "Audit the provider lifecycle" } },
+    }, "opencode"));
+    const [narrative] = normalizeTelemetry(envelope("opencode", {
+      type: "message.part.updated",
+      cwd: "/workspace/project",
+      properties: {
+        sessionID: "open-child",
+        part: { id: "part-1", sessionID: "open-child", type: "text", text: "Verifying the OpenCode provider" },
+      },
+    }, "opencode"));
+
+    expect(child.meta).toMatchObject({
+      sessionId: "open-child",
+      parentSessionId: "open-parent",
+      workstreamId: "open-parent",
+      workstreamName: "project",
+      sessionTitle: "Audit the provider lifecycle",
+    });
+    expect(narrative).toMatchObject({
+      detail: "Verifying the OpenCode provider",
+      meta: { sessionId: "open-child", activityClass: "narrative", narrativeKind: "message" },
+    });
+  });
+
   it("preserves public plan steps from Codex app-server updates", () => {
     const [event] = normalizeTelemetry(envelope("codex-app-server", {
       method: "item.plan_updated",
@@ -191,15 +294,65 @@ describe("telemetry normalization", () => {
     expect(event.plan).toEqual(["Inspect the source", "Render the plan"]);
   });
 
-  it("uses streamed Codex reasoning summaries as the headline narrative", () => {
-    const [event] = normalizeTelemetry(envelope("codex-app-server", {
+  it("does not promote streamed Codex text fragments into headline events", () => {
+    const reasoning = normalizeTelemetry(envelope("codex-app-server", {
       method: "item/reasoning/summaryTextDelta",
       params: { threadId: "thread-1", turnId: "turn-1", itemId: "reason-1", delta: "Verifying the provider feed" },
     }, "codex-app-server"));
+    const message = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/agentMessage/delta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "message-1", delta: "Fixed" },
+    }, "codex-app-server"));
+    const output = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/commandExecution/outputDelta",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "command-1", delta: "test output" },
+    }, "codex-app-server"));
+
+    expect(reasoning).toEqual([]);
+    expect(message).toEqual([]);
+    expect(output).toEqual([]);
+  });
+
+  it("uses finalized Codex reasoning summaries as stable headline narrative", () => {
+    const [event] = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", item: {
+        id: "reason-1",
+        type: "reasoning",
+        summary: ["**Verifying the provider feed**", "**Verifying the provider feed**", "**Checking lifecycle state**"],
+      } },
+    }, "codex-app-server"));
     expect(event).toMatchObject({
       kind: "reasoning.summary",
-      detail: "Verifying the provider feed",
+      detail: "**Verifying the provider feed** **Checking lifecycle state**",
       meta: { narrativeKind: "reasoning" },
+    });
+  });
+
+  it("does not replace useful narrative with empty Codex item-start placeholders", () => {
+    const reasoning = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { id: "reason-1", type: "reasoning", summary: [] } },
+    }, "codex-app-server"));
+    const message = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/started",
+      params: { threadId: "thread-1", turnId: "turn-1", item: { id: "message-1", type: "agentMessage" } },
+    }, "codex-app-server"));
+
+    expect(reasoning).toEqual([]);
+    expect(message).toEqual([]);
+  });
+
+  it("uses the Codex workspace directory rather than the task title for the workstream", () => {
+    const [event] = normalizeTelemetry(envelope("codex-app-server", {
+      method: "thread/started",
+      params: { thread: { id: "thread-1", name: "Fix stale completed sessions", cwd: "/workspace/BIGAGENT" } },
+    }, "codex-app-server"));
+
+    expect(event.meta).toMatchObject({
+      workstreamName: "BIGAGENT",
+      project: "BIGAGENT",
+      sessionTitle: "Fix stale completed sessions",
     });
   });
 

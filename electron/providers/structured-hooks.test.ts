@@ -1,0 +1,98 @@
+import { describe, expect, it } from "vitest";
+import {
+  copilotHooksConfigured,
+  cursorHooksConfigured,
+  geminiHooksConfigured,
+  grokHooksConfigured,
+  mergeCopilotHookSettings,
+  mergeCursorHookSettings,
+  mergeGeminiHookSettings,
+  mergeGrokHookSettings,
+  mergeWindsurfHookSettings,
+  observationBridgeCommand,
+  openCodePluginSource,
+  windsurfHooksConfigured,
+} from "./structured-hooks";
+
+const bridge = "ELECTRON_RUN_AS_NODE=1 '/opt/BIG AGENT/electron' '/opt/BIG AGENT/big-agent.mjs' hook provider || true";
+
+describe("official structured provider setup", () => {
+  it("preserves Cursor hooks and installs the narrative events idempotently", () => {
+    const original = { custom: true, hooks: { preToolUse: [{ command: "./audit.sh" }] } };
+    const configured = mergeCursorHookSettings(original, bridge.replace("provider", "cursor"));
+
+    expect(configured.custom).toBe(true);
+    expect((configured.hooks as Record<string, unknown[]>).preToolUse[0]).toEqual({ command: "./audit.sh" });
+    expect((configured.hooks as Record<string, unknown[]>).afterAgentThought).toHaveLength(1);
+    expect((configured.hooks as Record<string, unknown[]>).afterAgentResponse).toHaveLength(1);
+    expect(cursorHooksConfigured(configured)).toBe(true);
+    expect(mergeCursorHookSettings(configured, bridge.replace("provider", "cursor"))).toEqual(configured);
+  });
+
+  it("replaces stale BIG AGENT hook commands without touching user hooks", () => {
+    const stale = "ELECTRON_RUN_AS_NODE=1 '/tmp/.mount_old/electron' '/tmp/.mount_old/big-agent.mjs' hook cursor || true";
+    const current = bridge.replace("provider", "cursor");
+    const original = { hooks: { sessionStart: [{ command: "./audit.sh" }, { command: stale }] } };
+    const configured = mergeCursorHookSettings(original, current);
+    const sessionStart = (configured.hooks as Record<string, Array<{ command: string }>>).sessionStart;
+
+    expect(sessionStart).toEqual([{ command: "./audit.sh" }, { command: current }]);
+    expect(cursorHooksConfigured(configured, current)).toBe(true);
+    expect(JSON.stringify(configured)).not.toContain(".mount_old");
+  });
+
+  it("preserves Gemini settings and installs every command hook idempotently", () => {
+    const original = { theme: "dark", hooks: { BeforeTool: [{ hooks: [{ type: "command", command: "./audit.sh" }] }] } };
+    const command = bridge.replace("provider", "gemini");
+    const configured = mergeGeminiHookSettings(original, command);
+
+    expect(configured.theme).toBe("dark");
+    expect((configured.hooks as Record<string, unknown[]>).BeforeTool[0]).toEqual(original.hooks.BeforeTool[0]);
+    expect(geminiHooksConfigured(configured)).toBe(true);
+    expect(mergeGeminiHookSettings(configured, command)).toEqual(configured);
+  });
+
+  it("preserves Copilot hooks and installs fail-open commands idempotently", () => {
+    const original = { hooks: { PreToolUse: [{ type: "command", bash: "./audit.sh" }] } };
+    const command = bridge.replace("provider", "copilot");
+    const configured = mergeCopilotHookSettings(original, command);
+
+    expect((configured.hooks as Record<string, unknown[]>).PreToolUse[0]).toEqual(original.hooks.PreToolUse[0]);
+    expect(copilotHooksConfigured(configured)).toBe(true);
+    expect(JSON.stringify(configured)).toContain("|| true");
+    expect(mergeCopilotHookSettings(configured, command)).toEqual(configured);
+  });
+
+  it("installs Grok HTTP lifecycle hooks plus its authoritative idle backstop", () => {
+    const original = { hooks: { Stop: [{ hooks: [{ type: "command", command: "./audit.sh" }] }] } };
+    const configured = mergeGrokHookSettings(original);
+    const notification = (configured.hooks as Record<string, Array<Record<string, unknown>>>).Notification;
+
+    expect((configured.hooks as Record<string, unknown[]>).Stop[0]).toEqual(original.hooks.Stop[0]);
+    expect(notification).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: "idle_prompt" })]));
+    expect(grokHooksConfigured(configured)).toBe(true);
+    expect(mergeGrokHookSettings(configured)).toEqual(configured);
+  });
+
+  it("preserves Windsurf hooks without enabling transcript capture", () => {
+    const original = { hooks: { pre_read_code: [{ command: "./audit.sh" }] } };
+    const command = bridge.replace("provider", "windsurf");
+    const configured = mergeWindsurfHookSettings(original, command);
+
+    expect((configured.hooks as Record<string, unknown[]>).pre_read_code[0]).toEqual(original.hooks.pre_read_code[0]);
+    expect(windsurfHooksConfigured(configured)).toBe(true);
+    expect(JSON.stringify(configured)).not.toContain("include_transcript");
+    expect(mergeWindsurfHookSettings(configured, command)).toEqual(configured);
+  });
+
+  it("uses a bounded fail-open bridge and OpenCode global event plugin", () => {
+    const command = observationBridgeCommand("/opt/BIG AGENT/electron", "/opt/BIG AGENT/big-agent.mjs", "cursor");
+    const plugin = openCodePluginSource();
+
+    expect(command).toContain("ELECTRON_RUN_AS_NODE=1");
+    expect(command).toMatch(process.platform === "win32" ? /exit \/b 0/ : /\|\| true$/);
+    expect(plugin).toContain("/sources/opencode");
+    expect(plugin).toContain("AbortSignal.timeout(1000)");
+    expect(plugin).toContain("catch(() => {})");
+  });
+});

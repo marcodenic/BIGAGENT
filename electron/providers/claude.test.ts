@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLAUDE_HOOK_EVENTS, claudeHooksConfigured, mergeClaudeHookSettings } from "./claude";
+import { CLAUDE_HOOK_EVENTS, claudeHooksConfigured, claudeRegistryEvent, mergeClaudeHookSettings } from "./claude";
 
 describe("Claude HTTP hook setup", () => {
   it("preserves user hooks and installs every observation event idempotently", () => {
@@ -16,5 +16,20 @@ describe("Claude HTTP hook setup", () => {
     expect(Object.keys(configured.hooks as object)).toEqual(expect.arrayContaining([...CLAUDE_HOOK_EVENTS]));
     expect(mergeClaudeHookSettings(configured)).toEqual(configured);
   });
-});
 
+  it("keeps an explicit native session title separate from the Claude agent name", () => {
+    const event = claudeRegistryEvent({
+      sessionId: "claude-1",
+      state: "working",
+      cwd: "/workspace/BIGAGENT",
+      name: "reviewer",
+      customTitle: "Audit provider lifecycle",
+    });
+
+    expect(event?.meta).toMatchObject({
+      workstreamName: "BIGAGENT",
+      sessionTitle: "Audit provider lifecycle",
+      agentName: "reviewer",
+    });
+  });
+});

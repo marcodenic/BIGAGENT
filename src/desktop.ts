@@ -3,7 +3,7 @@ export type DesktopApi = {
   getSessions(): Promise<unknown[]>;
   getSnapshot(): Promise<unknown>;
   getProviders(): Promise<unknown>;
-  providerAction(provider: "codex" | "claude", action: "setup" | "retry" | "launch"): Promise<unknown>;
+  providerAction(provider: "codex" | "claude" | "grok" | "cursor" | "gemini" | "copilot" | "windsurf" | "opencode", action: "setup" | "retry" | "launch"): Promise<unknown>;
   imagePreview(path: string): Promise<string>;
   runProcess(command: string, args: string[]): Promise<void>;
   setScreenAwake(active: boolean): Promise<void>;

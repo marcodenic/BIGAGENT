@@ -16,6 +16,8 @@ BIG AGENT treats session, turn, tool, and subagent boundaries as different thing
 | `SessionEnd` / `thread/closed` | The main session actually ended | Show root completion, then expire it after 20 seconds |
 | Failure | Work failed | Keep the error visible until the session resumes or an authoritative snapshot removes it |
 
+Provider-specific ambiguity must resolve toward continued work, not a false `DONE`. In particular, Grok Build's `stopHookActive` can describe either a continuation or the final stop when another stop gate is installed, so BIG AGENT keeps that signal active and also consumes xAI's `idle_prompt` backstop. Provider hooks which expose an unambiguous final-response callback may close the turn directly; session completion still requires a separate session-end signal.
+
 ## Source authority
 
 Structured live sources own lifecycle state. The current precedence is App Server, then hooks/OTLP/SSE, then generic protocol/process events. The read-only Codex rollout fallback is disabled by default and can be enabled only with `BIG_AGENT_CODEX_FALLBACK=1`.

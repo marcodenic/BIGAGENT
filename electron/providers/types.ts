@@ -1,4 +1,4 @@
-export type ProviderId = "codex" | "claude";
+export type ProviderId = "codex" | "claude" | "grok" | "cursor" | "gemini" | "copilot" | "windsurf" | "opencode";
 export type ProviderState = "connecting" | "ready" | "needs-restart" | "needs-setup" | "unavailable" | "error";
 
 export interface ProviderAction {
@@ -21,4 +21,3 @@ export interface ProviderHealth {
 }
 
 export type ProviderHealthListener = (health: ProviderHealth) => void;
-

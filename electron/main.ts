@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
 import type { Server } from "node:http";
-import { extname, isAbsolute, join } from "node:path";
+import { dirname, extname, isAbsolute, join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from "electron";
 import { codexDesktopSessions, codexDesktopSnapshot, codexSourceSignature } from "./codex-sessions";
 import { ClaudeProvider } from "./providers/claude";
 import { CodexAppServerProvider } from "./providers/codex-app-server";
+import { createStructuredHookProviders, type StructuredHookProvider } from "./providers/structured-hooks";
 import type { ProviderHealth, ProviderId } from "./providers/types";
 import { TelemetryHub } from "./telemetry/hub";
 import { startOpenCodeSource } from "./telemetry/opencode";
@@ -58,12 +59,18 @@ let wakeLockId: number | null = null;
 let stopOpenCodeSource: (() => void) | null = null;
 let codexProvider: CodexAppServerProvider | null = null;
 let claudeProvider: ClaudeProvider | null = null;
+let structuredProviders: StructuredHookProvider[] = [];
 let previousSignature = "";
 let previousSessions = "";
 let safetyRefreshAt = 0;
 const telemetryHub = new TelemetryHub();
 const allowCodexFallback = process.env.BIG_AGENT_CODEX_FALLBACK === "1";
 const providerHealth = new Map<ProviderId, ProviderHealth>();
+const providerOrder: ProviderId[] = ["codex", "claude", "grok", "cursor", "gemini", "copilot", "windsurf", "opencode"];
+
+function providerSnapshot() {
+  return [...providerHealth.values()].sort((left, right) => providerOrder.indexOf(left.id) - providerOrder.indexOf(right.id));
+}
 
 function send(channel: string, payload: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
@@ -71,7 +78,7 @@ function send(channel: string, payload: unknown) {
 
 function updateProviderHealth(health: ProviderHealth) {
   providerHealth.set(health.id, health);
-  send("big-agent:providers", [...providerHealth.values()]);
+  send("big-agent:providers", providerSnapshot());
 }
 
 function setScreenAwake(active: boolean) {
@@ -186,9 +193,24 @@ function allSessionEvents() {
 function startProtocolServer() {
   protocolServer = createTelemetryServer(telemetryHub);
   protocolServer.on("error", (error) => console.error("Protocol server unavailable:", error.message));
-  protocolServer.on("listening", () => claudeProvider?.setReceiverListening(true));
-  protocolServer.on("close", () => claudeProvider?.setReceiverListening(false));
+  protocolServer.on("listening", () => {
+    claudeProvider?.setReceiverListening(true);
+    structuredProviders.forEach((provider) => provider.setReceiverListening(true));
+  });
+  protocolServer.on("close", () => {
+    claudeProvider?.setReceiverListening(false);
+    structuredProviders.forEach((provider) => provider.setReceiverListening(false));
+  });
   listenTelemetryServer(protocolServer);
+}
+
+async function installObservationBridge(source: string) {
+  const destination = join(app.getPath("userData"), "bin", "big-agent.mjs");
+  const temporary = `${destination}.${process.pid}.tmp`;
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(source, temporary);
+  await rename(temporary, destination);
+  return destination;
 }
 
 function windowForEvent(event: Electron.IpcMainInvokeEvent) {
@@ -197,14 +219,15 @@ function windowForEvent(event: Electron.IpcMainInvokeEvent) {
 
 function registerIpc() {
   ipcMain.handle("big-agent:get-sessions", () => allSessionEvents());
-  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: [...providerHealth.values()], legacy: allowCodexFallback ? codexDesktopSnapshot() : null }));
-  ipcMain.handle("big-agent:get-providers", () => [...providerHealth.values()]);
+  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: providerSnapshot(), legacy: allowCodexFallback ? codexDesktopSnapshot() : null }));
+  ipcMain.handle("big-agent:get-providers", () => providerSnapshot());
   ipcMain.handle("big-agent:provider-action", async (_event, provider: ProviderId, action: "setup" | "retry" | "launch") => {
-    if (!(["codex", "claude"] as string[]).includes(provider)) throw new Error("Unknown provider");
+    if (!providerOrder.includes(provider)) throw new Error("Unknown provider");
     if (!(["setup", "retry", "launch"] as string[]).includes(action)) throw new Error("Unknown provider action");
     if (provider === "codex") await codexProvider?.action(action);
-    else await claudeProvider?.action(action);
-    return [...providerHealth.values()];
+    else if (provider === "claude") await claudeProvider?.action(action);
+    else await structuredProviders.find((candidate) => candidate.health().id === provider)?.action(action);
+    return providerSnapshot();
   });
   ipcMain.handle("big-agent:image-preview", (_event, path: string) => imagePreview(path));
   ipcMain.handle("big-agent:run-process", (_event, command: string, args: string[]) => runProcess(command, args));
@@ -239,7 +262,7 @@ async function createWindow() {
   mainWindow.on("maximize", () => mainWindow?.setAlwaysOnTop(true));
   mainWindow.on("unmaximize", () => mainWindow?.setAlwaysOnTop(false));
   mainWindow.on("closed", () => { mainWindow = null; });
-  mainWindow.webContents.on("did-finish-load", () => send("big-agent:providers", [...providerHealth.values()]));
+  mainWindow.webContents.on("did-finish-load", () => send("big-agent:providers", providerSnapshot()));
   // Map the native surface before Chromium initializes its Vulkan compositor.
   // A hidden X11 window has no usable geometry for Vulkan surface creation.
   mainWindow.maximize();
@@ -263,10 +286,18 @@ else {
     Menu.setApplicationMenu(null);
     codexProvider = new CodexAppServerProvider(telemetryHub, updateProviderHealth);
     claudeProvider = new ClaudeProvider(telemetryHub, updateProviderHealth);
+    const bundledBridge = app.isPackaged
+      ? join(process.resourcesPath, "bin", "big-agent.mjs")
+      : join(__dirname, "../../scripts/big-agent.mjs");
+    const bridgeScript = await installObservationBridge(bundledBridge);
+    const observationExecutable = process.env.APPIMAGE || process.execPath;
+    structuredProviders = createStructuredHookProviders(observationExecutable, bridgeScript, updateProviderHealth);
     registerIpc();
     telemetryHub.onEvent((event) => {
       send("big-agent:event", event);
       if (event.meta?.product === "claude" && event.meta?.source === "claude-hooks") claudeProvider?.noteHookEvent();
+      const structured = structuredProviders.find((provider) => provider.health().id === event.meta?.product);
+      structured?.noteEvent();
       if (event.meta?.product === "codex" && event.meta?.source !== "codex-desktop-fallback") {
         // Clear the renderer's authoritative fallback snapshot immediately;
         // source priority alone cannot remove a stale row with a different id.
@@ -279,6 +310,7 @@ else {
     startSessionWatcher();
     void codexProvider.start();
     void claudeProvider.start();
+    structuredProviders.forEach((provider) => void provider.start());
     stopOpenCodeSource = startOpenCodeSource(telemetryHub);
     setTimeout(() => console.info("Electron GPU feature status:", app.getGPUFeatureStatus()), 3_000).unref();
   }).catch((error) => {
@@ -294,6 +326,7 @@ app.on("before-quit", () => {
   stopOpenCodeSource?.();
   codexProvider?.stop();
   claudeProvider?.stop();
+  structuredProviders.forEach((provider) => provider.stop());
   protocolServer?.close();
   setScreenAwake(false);
 });

@@ -25,7 +25,9 @@ Create a distributable platform package with `pnpm package`. Electron Builder pr
 
 BIG AGENT is agent-neutral. A main-process telemetry hub accepts official structured transports, keeps source provenance, deduplicates retransmissions, and projects activity into the compact versioned BIG AGENT protocol. Agent-specific parsing never occurs in React components.
 
-Codex Desktop is observed through its official App Server protocol. Claude Code is observed through its official HTTP hooks and `claude agents --json` registry. BIG AGENT's ready screen verifies each connection and offers setup, retry, and launch controls. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished agents and sessions remain visible briefly, turn-idle sessions leave the board, and failures remain conspicuous until resolved.
+The **FIND MY AGENTS** screen shows every built-in provider whether it is installed or not, distinguishes configured feeds from feeds that have emitted real activity, and offers setup, retry, and launch controls. Each nested agent line shows its observable narrative, tool, target, and detail. No manual session switching is required. Finished agents and sessions remain visible briefly, turn-idle sessions leave the board, and failures remain conspicuous until resolved.
+
+Built-in official integrations are Codex, Claude Code, Grok Build, Cursor, Gemini CLI, GitHub Copilot CLI, Windsurf/Devin Desktop, and OpenCode. BIG AGENT does not claim support for xAI's hosted Grok Bot yet: Grok Build has documented local lifecycle hooks, while Grok Bot does not currently expose an equivalent passive public event feed.
 
 With BIG AGENT running, send a simple event:
 
@@ -67,6 +69,17 @@ The rollout/database reader is disabled by default. `BIG_AGENT_CODEX_FALLBACK=1`
 
 BIG AGENT merges observation-only HTTP hooks into `~/.claude/settings.json` without replacing existing settings or hooks, then reconciles lifecycle state with `claude agents --json`. Hook responses are empty `204` responses so monitoring cannot control or block Claude. When the Claude CLI is installed, the ready screen confirms both the receiver and agent registry and offers **OPEN CLAUDE**.
 
+### Other built-in providers
+
+- **Grok Build:** official localhost HTTP lifecycle hooks in `~/.grok/hooks/big-agent.json`, including its documented `idle_prompt` backstop. This is Grok Build support, not hosted Grok Bot support.
+- **Cursor:** official global hooks in `~/.cursor/hooks.json`, including `afterAgentThought` and `afterAgentResponse` for the large narrative text.
+- **Gemini CLI:** official lifecycle hooks in `~/.gemini/settings.json`; native OpenTelemetry remains available as an additional transport.
+- **GitHub Copilot CLI:** official user lifecycle hooks in `~/.copilot/hooks/big-agent.json`. This observes local CLI sessions; hosted cloud-agent jobs require a separately deployed remote relay.
+- **Windsurf/Devin Desktop:** official Cascade hooks in `~/.codeium/windsurf/hooks.json`, including planner-response summaries. BIG AGENT deliberately does not enable full transcript capture.
+- **OpenCode:** an official global plugin in `~/.config/opencode/plugins/big-agent.js`, with the documented SSE server feed retained as an optional compatibility source.
+
+Setup copies BIG AGENT's bridge to a stable per-user application-data path before adding a hook. Upgrades replace only stale BIG AGENT entries and preserve unrelated provider settings and hooks. Every command hook is fail-open; monitoring cannot deny or block an agent operation.
+
 ### OpenTelemetry
 
 Products with native OTLP support can send `http/json` directly to `http://127.0.0.1:19777`, or use the standard OpenTelemetry Collector for the usual protobuf and gRPC transports:
@@ -77,7 +90,7 @@ otelcol --config telemetry/otel-collector.yaml
 
 Point the product at `http://127.0.0.1:4318` for OTLP/HTTP or `127.0.0.1:4317` for OTLP/gRPC. The included Collector configuration converts the standard signals to OTLP/JSON for BIG AGENT.
 
-### Other hooks, OpenCode, and ACP
+### Other hooks and ACP
 
 Use this command as a lifecycle hook in supported products, replacing the provider name as appropriate:
 
@@ -85,7 +98,7 @@ Use this command as a lifecycle hook in supported products, replacing the provid
 node /absolute/path/to/BIGAGENT/scripts/big-agent.mjs hook claude
 ```
 
-The hook bridge deliberately returns success even if BIG AGENT is closed, so monitoring cannot block an agent. OpenCode's global SSE feed is detected at `http://127.0.0.1:4096`; set `BIG_AGENT_OPENCODE_URL` before launching BIG AGENT when using another address. ACP agents can be observed transparently with:
+The hook bridge deliberately returns success even if BIG AGENT is closed, so monitoring cannot block an agent. OpenCode's optional SSE feed is detected at `http://127.0.0.1:4096`; set `BIG_AGENT_OPENCODE_URL` before launching BIG AGENT when using another address. ACP agents can be observed transparently with:
 
 ```bash
 node scripts/big-agent.mjs proxy acp -- your-agent --acp
@@ -112,5 +125,5 @@ The Electron main process owns source connections, normalization, provider readi
 pnpm test
 ```
 
-Tests cover protocol, hook, OTLP, ACP, OpenCode and Codex normalization; source deduplication; state transitions; Grok phase mapping; attention; completion; and errors.
+Tests cover protocol, provider config merging, hook neutrality, OTLP, ACP, OpenCode and Codex normalization; source deduplication; state transitions; narrative selection; Grok phase mapping; attention; completion; and errors.
  

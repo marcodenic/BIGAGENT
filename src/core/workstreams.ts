@@ -8,6 +8,7 @@ export interface AgentSession {
   parentSessionId: string;
   workstreamId: string;
   workstreamName: string;
+  sessionTitle: string;
   agentName: string;
   modelProvider: string;
   model: string;
@@ -84,6 +85,7 @@ export function applySessionEvent(
   const parentSessionId = metaText(event, "parentSessionId") ?? previous?.parentSessionId ?? "";
   const workstreamId = metaText(event, "workstreamId") ?? metaText(event, "threadId") ?? metaText(event, "project") ?? previous?.workstreamId ?? sessionId;
   const workstreamName = metaText(event, "workstreamName") ?? metaText(event, "project") ?? metaText(event, "sessionName") ?? previous?.workstreamName ?? "AMBIENT TASK";
+  const sessionTitle = metaText(event, "sessionTitle") ?? previous?.sessionTitle ?? "";
   const agentName = metaText(event, "agentName") ?? metaText(event, "sessionName") ?? previous?.agentName ?? "AGENT";
   const modelProvider = metaText(event, "modelProvider") ?? previous?.modelProvider ?? "unknown";
   const model = metaText(event, "model") ?? previous?.model ?? "unknown model";
@@ -113,7 +115,7 @@ export function applySessionEvent(
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
   return {
     ...sessions,
-    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
+    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, sessionTitle, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
   };
 }
 

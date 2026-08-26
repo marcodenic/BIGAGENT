@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld("bigAgentDesktop", Object.freeze({
   getSessions: () => ipcRenderer.invoke("big-agent:get-sessions"),
   getSnapshot: () => ipcRenderer.invoke("big-agent:get-snapshot"),
   getProviders: () => ipcRenderer.invoke("big-agent:get-providers"),
-  providerAction: (provider: "codex" | "claude", action: "setup" | "retry" | "launch") => ipcRenderer.invoke("big-agent:provider-action", provider, action),
+  providerAction: (provider: "codex" | "claude" | "grok" | "cursor" | "gemini" | "copilot" | "windsurf" | "opencode", action: "setup" | "retry" | "launch") => ipcRenderer.invoke("big-agent:provider-action", provider, action),
   imagePreview: (path: string) => ipcRenderer.invoke("big-agent:image-preview", path),
   runProcess: (command: string, args: string[]) => ipcRenderer.invoke("big-agent:run-process", command, args),
   setScreenAwake: (active: boolean) => ipcRenderer.invoke("big-agent:set-screen-awake", active),

@@ -12,7 +12,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
-async function runHook(payload: Record<string, unknown>) {
+async function runHook(payload: Record<string, unknown>, provider = "codex") {
   let receivedPath = "";
   let receivedBody = "";
   const server = createServer((request, response) => {
@@ -28,7 +28,7 @@ async function runHook(payload: Record<string, unknown>) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
-  const child = spawn(process.execPath, [bridge, "hook", "codex"], {
+  const child = spawn(process.execPath, [bridge, "hook", provider], {
     env: { ...process.env, BIG_AGENT_URL: `http://127.0.0.1:${port}/event` },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -54,5 +54,10 @@ describe("Codex hook bridge", () => {
     const result = await runHook({ hook_event_name: "Stop", turn_id: "turn-1" });
     expect(JSON.parse(result.stdout)).toEqual({ continue: true });
     expect(result.stderr).toBe("");
+  });
+
+  it("keeps Copilot Stop observational by returning no control fields", async () => {
+    const result = await runHook({ hook_event_name: "Stop", session_id: "copilot-1" }, "copilot");
+    expect(result).toMatchObject({ code: 0, stdout: "", stderr: "", receivedPath: "/hooks/copilot" });
   });
 });

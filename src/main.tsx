@@ -15,6 +15,11 @@ import {
 import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg?raw";
 import claudeIcon from "@lobehub/icons-static-svg/icons/claude.svg?raw";
 import geminiIcon from "@lobehub/icons-static-svg/icons/gemini.svg?raw";
+import cursorIcon from "@lobehub/icons-static-svg/icons/cursor.svg?raw";
+import githubCopilotIcon from "@lobehub/icons-static-svg/icons/githubcopilot.svg?raw";
+import grokIcon from "@lobehub/icons-static-svg/icons/grok.svg?raw";
+import openCodeIcon from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
+import windsurfIcon from "@lobehub/icons-static-svg/icons/windsurf.svg?raw";
 import qwenIcon from "@lobehub/icons-static-svg/icons/qwen.svg?raw";
 import metaIcon from "@lobehub/icons-static-svg/icons/meta.svg?raw";
 import "@fontsource-variable/geist";
@@ -30,6 +35,17 @@ import {
 import "./styles.css";
 
 const PROVIDER_ONBOARDING_KEY = "big-agent.provider-onboarding.v1";
+const providerIds = ["codex", "claude", "grok", "cursor", "gemini", "copilot", "windsurf", "opencode"] as const;
+const providerDiscoveryIcons: Record<ProviderHealth["id"], string> = {
+  codex: openaiIcon,
+  claude: claudeIcon,
+  grok: grokIcon,
+  cursor: cursorIcon,
+  gemini: geminiIcon,
+  copilot: githubCopilotIcon,
+  windsurf: windsurfIcon,
+  opencode: openCodeIcon,
+};
 
 function providerOnboardingComplete() {
   try { return window.localStorage.getItem(PROVIDER_ONBOARDING_KEY) === "complete"; } catch { return false; }
@@ -44,7 +60,7 @@ function providerHealthList(value: unknown): ProviderHealth[] {
   return value.filter((item): item is ProviderHealth => {
     if (!item || typeof item !== "object") return false;
     const candidate = item as Partial<ProviderHealth>;
-    return (candidate.id === "codex" || candidate.id === "claude") && typeof candidate.detail === "string" && Array.isArray(candidate.actions);
+    return providerIds.includes(candidate.id as ProviderHealth["id"]) && typeof candidate.detail === "string" && Array.isArray(candidate.actions);
   });
 }
 
@@ -482,9 +498,14 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
   const agentNames = [...new Set(workstream.agents.map((agent) => agent.agentName))];
   const agentLabel = `${agentNames[0] ?? "AGENT"}${agentNames.length > 1 ? ` +${agentNames.length - 1}` : ""}`;
+  const rootAgents = workstream.agents.filter((agent) => !agent.parentSessionId);
+  const titledAgents = rootAgents.some((agent) => agent.sessionTitle) ? rootAgents : workstream.agents;
+  const sessionTitles = [...new Set(titledAgents.map((agent) => displayText(agent.sessionTitle, "")).filter((title) => title && title.toLowerCase() !== workstream.name.toLowerCase()))];
+  const sessionTitle = privacy || !sessionTitles.length ? "" : `${sessionTitles[0]}${sessionTitles.length > 1 ? ` +${sessionTitles.length - 1}` : ""}`;
   return <article className={`workstream status-${workstream.status} ${workstream.agents.length === 1 ? "single-agent" : ""} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
       <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
+      {sessionTitle && <p className="session-title" title={sessionTitles.join(" + ")}>{sessionTitle}</p>}
       <div className="identity-meta">
         <div className="workstream-dots" aria-label={`${workstream.agents.length} agents`}>
           {workstream.agents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
@@ -538,7 +559,7 @@ function ProviderDiscovery({ providers, busy, onboarding, onAction, onContinue }
         const status = providerStatusPresentation(provider.state);
         return <article key={provider.id} className={`provider-health state-${provider.state}`}>
           <div className="provider-health-heading">
-            <span className={`provider-health-logo provider-${provider.id}`} dangerouslySetInnerHTML={{ __html: provider.id === "codex" ? openaiIcon : claudeIcon }} />
+            <span className={`provider-health-logo provider-${provider.id}`} dangerouslySetInnerHTML={{ __html: providerDiscoveryIcons[provider.id] }} />
             <div><b>{provider.label}</b><small>{provider.transport}</small></div>
             <span className={`provider-status-chip tone-${status.tone}`}><i aria-hidden="true" />{status.label}</span>
           </div>
@@ -549,7 +570,7 @@ function ProviderDiscovery({ providers, busy, onboarding, onAction, onContinue }
           })}</div>}
         </article>;
       })}
-      {providers.length === 0 && <article className="provider-health state-connecting"><div className="provider-health-heading"><div><b>DISCOVERING PROVIDERS</b><small>LOCAL TELEMETRY</small></div><span className="provider-status-chip tone-neutral"><i aria-hidden="true" />CONNECTING</span></div><p>Checking Codex App Server and Claude hooks</p></article>}
+      {providers.length === 0 && <article className="provider-health state-connecting"><div className="provider-health-heading"><div><b>DISCOVERING PROVIDERS</b><small>LOCAL TELEMETRY</small></div><span className="provider-status-chip tone-neutral"><i aria-hidden="true" />CONNECTING</span></div><p>Checking official app servers, hooks, plugins, telemetry, and event streams</p></article>}
     </div>
     <div className={`provider-discovery-result ${found ? "has-agents" : discovering ? "is-discovering" : "has-no-agents"}`}>
       <div className="empty-face provider-ready-face"><FaceVisual
@@ -707,7 +728,7 @@ function App() {
 
   return <main className={`app board-count-${Math.min(Math.max(displayWorkstreams.length, 1), 9)} ${useAgentTiles ? "agent-tile-board" : ""} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header>
-      <div className="brand"><span className="brand-face">-_</span><b>BIG AGENT</b></div>
+      <div className="brand"><span className="brand-face">—_—</span><b>BIG AGENT</b></div>
       <div className="summary">{providerSetupOpen ? "AGENT CONNECTIONS" : summary}</div>
       <div className="header-actions">
         <button className={`agents-toggle ${providerSetupOpen ? "is-active" : ""}`} onClick={() => { setInspection(false); setProviderSetupOpen((value) => !value); }} aria-label="Manage agent connections">{providerSetupOpen ? "BACK" : "AGENTS"}</button>

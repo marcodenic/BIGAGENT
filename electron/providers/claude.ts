@@ -125,7 +125,7 @@ function agentSessionId(entry: Json) {
   return text(entry.sessionId, entry.session_id) ?? (text(entry.id) ? `claude:${text(entry.id)}` : undefined);
 }
 
-function registryEvent(entry: Json, previousState?: string): AgentEvent | undefined {
+export function claudeRegistryEvent(entry: Json, previousState?: string): AgentEvent | undefined {
   const sessionId = agentSessionId(entry);
   const rawState = text(entry.state, entry.status)?.toLowerCase();
   if (!sessionId || !rawState) return undefined;
@@ -182,6 +182,7 @@ function registryEvent(entry: Json, previousState?: string): AgentEvent | undefi
       workstreamId: sessionId,
       workstreamName: basename(cwd) || text(entry.name) || "CLAUDE",
       project: cwd,
+      sessionTitle: text(entry.sessionTitle, entry.session_title, entry.customTitle, entry.custom_title, entry.title),
       agentName: text(entry.name) || "Claude",
       modelProvider: "anthropic",
       model: text(entry.model) || "claude",
@@ -366,7 +367,7 @@ export class ClaudeProvider {
   }
 
   private ingestRegistry(entry: Json, previousState?: string) {
-    const event = registryEvent(entry, previousState);
+    const event = claudeRegistryEvent(entry, previousState);
     if (!event) return;
     this.hub.ingest({ source: "claude-agents", product: "claude", transport: "agents-json", format: "protocol", payload: event });
   }

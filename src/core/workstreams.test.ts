@@ -16,6 +16,20 @@ describe("workstream projection", () => {
     expect(workstreams[0].label).toBe("WORKING");
   });
 
+  it("retains a native session title separately from the project name", () => {
+    const titled = normalizeSimpleEvent({
+      status: "thinking",
+      detail: "Planning",
+      meta: { sessionId: "01", threadId: "project", workstreamName: "BIGAGENT", sessionTitle: "Fix stale completed sessions" },
+    }, "titled");
+    const sessions = applySessionEvent({}, titled, 1_000, "codex-app-server");
+
+    expect(sessions["01"]).toMatchObject({
+      workstreamName: "BIGAGENT",
+      sessionTitle: "Fix stale completed sessions",
+    });
+  });
+
   it("keeps tool results in activity without promoting them to the headline", () => {
     const result = normalizeSimpleEvent({
       status: "working",

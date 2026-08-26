@@ -2,7 +2,7 @@ export type ProviderAction = { id: "setup" | "retry" | "launch"; label: string }
 export type ProviderState = "connecting" | "ready" | "needs-restart" | "needs-setup" | "unavailable" | "error";
 
 export type ProviderHealth = {
-  id: "codex" | "claude";
+  id: "codex" | "claude" | "grok" | "cursor" | "gemini" | "copilot" | "windsurf" | "opencode";
   label: string;
   transport: string;
   state: ProviderState;
@@ -41,7 +41,17 @@ export function observableProviders(providers: ProviderHealth[]) {
 export function visibleProviderMessage(providers: ProviderHealth[]) {
   const visible = observableProviders(providers);
   if (!visible.length) return "We can’t see any agents. We support any of the agents above.";
-  const labels = visible.map((provider) => provider.label.charAt(0) + provider.label.slice(1).toLowerCase());
+  const names: Record<ProviderHealth["id"], string> = {
+    codex: "Codex",
+    claude: "Claude",
+    grok: "Grok Build",
+    cursor: "Cursor",
+    gemini: "Gemini CLI",
+    copilot: "Copilot CLI",
+    windsurf: "Windsurf",
+    opencode: "OpenCode",
+  };
+  const labels = visible.map((provider) => names[provider.id]);
   if (labels.length === 1) return `We can see ${labels[0]}.`;
   return `We can see ${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}.`;
 }

@@ -18,7 +18,11 @@ async function post(path, value, headers = {}, timeoutMs) {
   if (!response.ok) throw new Error(`BIG AGENT returned ${response.status}: ${await response.text()}`);
 }
 
-function hookOutput(value) {
+function hookOutput(value, provider) {
+  // Gemini requires hook stdout, when present, to be one JSON object. An empty
+  // object is explicitly non-controlling and keeps this bridge observational.
+  if (provider === "gemini") return "{}\n";
+  if (provider !== "codex") return "";
   const eventName = String(value?.hook_event_name ?? value?.hookEventName ?? "")
     .toLowerCase().replace(/[^a-z0-9]+/g, "");
   // Stop hooks require JSON output. PreToolUse and PermissionRequest reject
@@ -100,7 +104,7 @@ if (verb === "emit") {
       // Monitoring must never block the host agent's lifecycle.
       console.error(`BIG AGENT hook unavailable: ${error.message}`);
     }
-    process.stdout.write(hookOutput(payload));
+    process.stdout.write(hookOutput(payload, provider));
   });
 } else if (verb === "run" && rest[0] === "--" && rest[1]) {
   const [command, ...args] = rest.slice(1);
@@ -129,7 +133,7 @@ if (verb === "emit") {
     "Usage:",
     "  big-agent emit '{\"status\":\"thinking\"}'",
     "  big-agent pipe < events.jsonl",
-    "  big-agent hook <codex|claude|cursor|gemini|grok|cline|windsurf>",
+    "  big-agent hook <codex|claude|cursor|gemini|copilot|grok|cline|windsurf>",
     "  big-agent run -- <command> [args]",
     "  big-agent codex -- codex exec <prompt>",
     "  big-agent proxy codex-app-server -- codex app-server",

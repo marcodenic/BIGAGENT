@@ -8,7 +8,7 @@ Prefer these integration lanes, in order:
 4. Product event streams such as OpenCode SSE.
 5. Read-only databases/logs and generic JSONL only as explicit fallbacks.
 
-The telemetry hub keeps the original source, product, transport and provider event name in `meta`, then translates observable activity into `AgentEvent`. It does not retain prompt bodies or private reasoning.
+The telemetry hub keeps the original source, product, transport and provider event name in `meta`, then translates observable activity into `AgentEvent`. It does not retain user prompt bodies or read transcript files. Narrative text is accepted only from fields the provider explicitly emits for observation, such as a reasoning summary, agent thought, final response, or planner response.
 
 ## Built-in providers
 
@@ -22,6 +22,32 @@ Codex Desktop must use the same daemon for passive monitoring. On Linux BIG AGEN
 
 BIG AGENT installs official HTTP observation hooks for session, prompt, message, tool, permission, subagent, task, stop, and compaction events. It preserves existing Claude settings and hook actions. The localhost receiver always returns an empty `204`, the documented neutral result, so BIG AGENT cannot affect Claude's behavior. `claude agents --json` supplies an authoritative active-session registry; `--all` is consulted to classify agents that leave the active list.
 
+### Grok Build
+
+BIG AGENT installs xAI's official HTTP hook handlers in `~/.grok/hooks/big-agent.json`. `UserPromptSubmit` marks activity; `Stop`, `StopFailure`, and `StopCancelled` cover turn outcomes; and the documented `idle_prompt` notification is installed as the idle backstop. Tool, subagent, compaction, and session events use the same feed. This integration applies to Grok Build. The hosted Grok Bot product is not advertised because it has no documented passive public event feed.
+
+### Cursor
+
+BIG AGENT merges official global hooks into `~/.cursor/hooks.json`. In addition to session, tool, stop, and subagent boundaries, `afterAgentThought` and `afterAgentResponse` provide provider-designated narrative text. Cursor reloads its hook file automatically.
+
+### Gemini CLI
+
+BIG AGENT merges official command hooks into `~/.gemini/settings.json`. `BeforeAgent` and `AfterAgent` provide turn boundaries and the final `prompt_response`; tool, notification, compaction, and session hooks fill out the lifecycle. Hook stdout is the documented neutral `{}` object. Gemini's native OTLP export can also target BIG AGENT's collector.
+
+### GitHub Copilot CLI
+
+BIG AGENT writes one official user hook file at `~/.copilot/hooks/big-agent.json` (or `$COPILOT_HOME/hooks/`). It uses the VS Code-compatible PascalCase event names so payloads arrive in the shared snake_case schema. The bridge is explicitly fail-open because Copilot treats command errors in `PreToolUse` as deny. Local CLI sessions are built in; Copilot cloud jobs need a remote relay because their sandbox cannot reach a user's localhost receiver.
+
+### Windsurf / Devin Desktop
+
+BIG AGENT merges official Cascade hooks into `~/.codeium/windsurf/hooks.json`. `post_cascade_response` contains markdown planner responses, while read, write, command, MCP, and prompt events provide activity. BIG AGENT extracts the latest planner response and deliberately does not configure `post_cascade_response_with_transcript`.
+
+### OpenCode
+
+BIG AGENT installs a global OpenCode event plugin at `~/.config/opencode/plugins/big-agent.js`. The plugin forwards the official event object to localhost without awaiting the request, so observation cannot delay the agent. The optional `/global/event` or `/event` SSE adapter remains available when OpenCode is running an addressable server; BIG AGENT does not assume that a normal in-process TUI owns port 4096.
+
+All command-hook integrations invoke a stable bridge copied into BIG AGENT's per-user application-data directory. Setup removes and replaces only older BIG AGENT hook entries, including transient AppImage paths, while leaving user hooks unchanged.
+
 Adapters must keep session, turn, tool, and child-agent boundaries distinct. In particular, a turn-level stop or idle notification is not a session completion. See the [lifecycle contract](lifecycle.md).
 
 ## Local endpoints
@@ -29,12 +55,13 @@ Adapters must keep session, turn, tool, and child-agent boundaries distinct. In 
 | Endpoint | Input |
 |---|---|
 | `POST /event` | BIG AGENT protocol or concise status event |
-| `POST /hooks/:provider` | Claude/Cursor/Gemini/Grok/Cline/Windsurf-style hook payload |
+| `POST /hooks/:provider` | Cursor/Gemini/Copilot/Windsurf and compatible lifecycle-hook payload |
 | `POST /v1/traces` | OTLP/JSON traces |
 | `POST /v1/logs` | OTLP/JSON logs |
 | `POST /v1/metrics` | OTLP/JSON metrics/source health |
 | `POST /sources/codex-app-server` | Codex App Server JSON-RPC from an external proxy/adapter |
 | `POST /sources/codex-json` | Codex `exec --json` |
+| `POST /sources/opencode` | OpenCode plugin or server event object |
 | `POST /sources/acp` | ACP JSON-RPC |
 | `GET /health` | Source connection and event counters |
 

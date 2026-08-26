@@ -40,6 +40,13 @@ function planSteps(...values: unknown[]) {
   return steps.length ? [...new Set(steps)].slice(0, 6) : undefined;
 }
 
+function uniqueTextParts(value: unknown) {
+  const seen = new Set<string>();
+  return array(value)
+    .map((part) => typeof part === "string" ? part.trim() : text(object(part).text) ?? "")
+    .filter((part) => part.length > 0 && !seen.has(part) && Boolean(seen.add(part)));
+}
+
 function numberValue(...values: unknown[]) {
   return values.find((value): value is number => typeof value === "number" && Number.isFinite(value));
 }
@@ -88,27 +95,34 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
   const project = nested(payload, "project");
   const agent = nested(payload, "agent");
   const model = nested(payload, "model");
-  const sessionId = firstNestedText(payload, ["session_id", "sessionId", "conversation_id", "conversationId", "thread_id", "threadId", "task_id", "taskId"])
+  const workspaceRoots = array(payload.workspace_roots ?? payload.workspaceRoots);
+  const modelParams = array(payload.model_params ?? payload.modelParams).map(object);
+  const sessionId = firstNestedText(payload, ["session_id", "sessionId", "conversation_id", "conversationId", "trajectory_id", "trajectoryId", "thread_id", "threadId", "task_id", "taskId"])
     ?? text(session.id, thread.id, extra.sessionId);
+  const parentSessionId = firstNestedText(payload, ["parent_session_id", "parentSessionId", "parent_thread_id", "parentThreadId", "parent_id", "parentId", "parentID"]);
   const workstreamId = firstNestedText(payload, ["workstream_id", "workstreamId", "project_id", "projectId"])
+    ?? parentSessionId
     ?? text(project.id, extra.workstreamId, sessionId);
-  const cwd = firstNestedText(payload, ["cwd", "directory", "workspace", "workspace_path", "workspacePath"]);
+  const cwd = firstNestedText(payload, ["cwd", "directory", "workspace", "workspace_path", "workspacePath", "workspace_root", "workspaceRoot"])
+    ?? text(workspaceRoots[0]);
+  const effort = modelParams.find((item) => key(item.id) === "effort");
   return {
     source: envelope.source,
     product: envelope.product,
     transport: envelope.transport,
     direction: envelope.direction,
     sessionId,
-    parentSessionId: firstNestedText(payload, ["parent_session_id", "parentSessionId", "parent_thread_id", "parentThreadId"]),
+    parentSessionId,
     threadId: text(thread.id, payload.thread_id, payload.threadId),
-    turnId: text(payload.turn_id, payload.turnId, extra.turnId),
+    turnId: text(payload.turn_id, payload.turnId, payload.execution_id, payload.executionId, payload.prompt_id, payload.promptId, payload.generation_id, payload.generationId, extra.turnId),
     workstreamId,
     workstreamName: text(project.name, payload.project_name, payload.projectName, cwd?.split(/[\\/]/).filter(Boolean).pop()),
     project: text(project.name, payload.project_name, payload.projectName, cwd),
+    sessionTitle: text(payload.session_title, payload.sessionTitle, payload.custom_title, payload.customTitle, session.title, thread.title, extra.sessionTitle),
     agentName: text(agent.name, payload.agent_name, payload.agentName, extra.agentName, envelope.product),
     modelProvider: text(model.provider, payload.model_provider, payload.modelProvider, extra.modelProvider, envelope.product),
-    model: text(model.id, model.name, payload.model_id, payload.modelId, payload.model, extra.model),
-    effort: text(payload.reasoning_effort, payload.reasoningEffort, extra.effort),
+    model: text(model.id, model.name, payload.model_id, payload.modelId, payload.model_name, payload.modelName, payload.model, extra.model),
+    effort: text(payload.reasoning_effort, payload.reasoningEffort, effort?.value, extra.effort),
     ...extra,
   };
 }
@@ -173,13 +187,15 @@ function protocolEvents(envelope: TelemetryEnvelope): AgentEvent[] {
 
 function hookEvents(envelope: TelemetryEnvelope) {
   const payload = object(envelope.payload);
-  const toolInput = object(payload.tool_input ?? payload.toolInput);
-  const rawName = text(payload.hook_event_name, payload.hookEventName, payload.event_name, payload.eventName, payload.event, payload.type, payload.name) ?? "hook";
+  const toolInfo = object(payload.tool_info ?? payload.toolInfo);
+  const toolInput = object(payload.tool_input ?? payload.toolInput ?? toolInfo.tool_input ?? toolInfo.toolInput);
+  const rawName = text(payload.hook_event_name, payload.hookEventName, payload.agent_action_name, payload.agentActionName, payload.event_name, payload.eventName, payload.event, payload.type, payload.name) ?? "hook";
   const eventName = key(rawName);
-  const toolName = text(payload.tool_name, payload.toolName, nested(payload, "tool").name);
-  const command = text(payload.command, toolInput.command);
+  const toolName = text(payload.tool_name, payload.toolName, toolInfo.mcp_tool_name, toolInfo.mcpToolName, nested(payload, "tool").name);
+  const command = text(payload.command, toolInput.command, toolInfo.command_line, toolInfo.commandLine);
   const description = text(payload.description, toolInput.description);
-  const parentSessionId = text(payload.session_id, payload.sessionId);
+  const target = text(payload.file_path, payload.filePath, toolInfo.file_path, toolInfo.filePath);
+  const parentSessionId = text(payload.session_id, payload.sessionId, payload.trajectory_id, payload.trajectoryId);
   const agentId = text(payload.agent_id, payload.agentId);
   const agentType = text(payload.agent_type, payload.agentType);
   const messageId = text(payload.message_id, payload.messageId);
@@ -188,7 +204,7 @@ function hookEvents(envelope: TelemetryEnvelope) {
   const identity = text(payload.event_id, payload.eventId, payload.id) ?? [
     rawName,
     text(payload.session_id, payload.sessionId),
-    text(payload.turn_id, payload.turnId),
+    text(payload.turn_id, payload.turnId, payload.execution_id, payload.executionId, payload.prompt_id, payload.promptId),
     agentId,
     messageId,
     messageIndex,
@@ -211,6 +227,31 @@ function hookEvents(envelope: TelemetryEnvelope) {
     parentSessionId,
     lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage),
   };
+  const narrative = (() => {
+    const raw = text(
+      payload.text,
+      payload.prompt_response,
+      payload.promptResponse,
+      payload.last_assistant_message,
+      payload.lastAssistantMessage,
+      toolInfo.response,
+    );
+    if (!raw) return undefined;
+    if (/postcascaderesponse/.test(eventName)) {
+      const planner = [...raw.matchAll(/###\s+Planner Response\s*\n([\s\S]*?)(?=\n###\s+|$)/gi)]
+        .map((match) => match[1].trim()).filter(Boolean).at(-1);
+      return (planner || raw).replace(/\s+/g, " ").trim().slice(0, 1_000);
+    }
+    return raw.replace(/\s+/g, " ").trim().slice(0, 1_000);
+  })();
+  const narrativeEvent = (kind: "reasoning" | "message") => makeEvent(envelope, payload, "working", "activity", {
+    identity: `${identity}|narrative|${kind}`,
+    phase: kind === "reasoning" ? "planning" : "responding",
+    label: kind === "reasoning" ? "THINKING" : "RESPONDING",
+    detail: narrative || (kind === "reasoning" ? "Planning the next step" : "Writing a response"),
+    meta: { rawEventName: rawName, activityClass: "narrative", narrativeKind: kind },
+  });
+  if (/permissiondenied/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "DENIED", detail: "Permission denied", tool: toolName })];
   if (/permission|approval/.test(eventName)) return [makeEvent(envelope, payload, "approval", "approval.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Permission required", tool: toolName })];
   if (/question|inputrequested|userinput/.test(eventName)) return [makeEvent(envelope, payload, "waiting", "input.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Input required" })];
   if (/error|failure|failed/.test(eventName)) return [makeEvent(envelope, payload, "error", "error", { ...common, phase: "failed", detail: text(payload.error, payload.message, nested(payload, "error").message) || "Agent reported an error" })];
@@ -236,6 +277,18 @@ function hookEvents(envelope: TelemetryEnvelope) {
       },
     })];
   }
+  if (/afteragentthought/.test(eventName)) return [narrativeEvent("reasoning")];
+  if (/afteragentresponse/.test(eventName)) return [narrativeEvent("message")];
+  if (/afteragent|postcascaderesponse/.test(eventName)) return [
+    narrativeEvent("message"),
+    makeEvent(envelope, payload, "idle", "turn.end", {
+      identity: `${identity}|turn-end`,
+      phase: "idle",
+      label: "READY",
+      detail: "Turn finished",
+      meta: { rawEventName: rawName, lastMessage: narrative },
+    }),
+  ];
   if (/sessionstart/.test(eventName)) {
     const startSource = key(payload.source);
     if (startSource === "compact") return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "retrying", label: "LOADING", detail: "Compacting context" })];
@@ -243,26 +296,42 @@ function hookEvents(envelope: TelemetryEnvelope) {
   }
   if (/taskcreated|taskstart/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: text(payload.subject, payload.description) || "Task created" })];
   if (/taskcompleted|taskcomplete|taskend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: text(payload.subject, payload.description) || "Task completed" })];
-  if (/turnstart|beforeagent/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "Agent started" })];
+  if (/turnstart|beforeagent|preuserprompt|beforesubmitprompt/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "Agent started" })];
   if (/sessionend/.test(eventName)) return [makeEvent(envelope, payload, "complete", "session.end", { ...common, phase: "completing", detail: "Agent session completed", meta: { rawEventName: rawName, lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage) } })];
-  if (/turnend|afteragent|stop$/.test(eventName)) {
+  if (/notification/.test(eventName) && key(payload.notification_type ?? payload.notificationType) === "idleprompt") {
+    return [makeEvent(envelope, payload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: "Agent is idle" })];
+  }
+  if (/turnend|stop$|stopcancelled/.test(eventName)) {
     const backgroundWork = [...array(payload.background_tasks), ...array(payload.backgroundTasks), ...array(payload.session_crons), ...array(payload.sessionCrons)];
     if (backgroundWork.length) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "WORKING", detail: "Background work continues" })];
-    return [makeEvent(envelope, payload, "idle", "turn.end", {
+    if (payload.stop_hook_active === true || payload.stopHookActive === true) {
+      return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "responding", label: "WORKING", detail: narrative || "Agent may be continuing after a stop hook" })];
+    }
+    const ended = makeEvent(envelope, payload, "idle", "turn.end", {
       ...common,
       phase: "idle",
       label: "READY",
       detail: "Turn finished",
-      meta: { rawEventName: rawName, lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage) },
-    })];
+      meta: { rawEventName: rawName, lastMessage: narrative },
+    });
+    return narrative ? [narrativeEvent("message"), ended] : [ended];
   }
+  if (/prereadcode/.test(eventName)) return [makeEvent(envelope, payload, "searching", "command.start", { ...common, phase: "searching", label: "SEARCHING", detail: target ? `Reading ${target}` : "Reading code", target })];
+  if (/prewritecode/.test(eventName)) return [makeEvent(envelope, payload, "editing", "command.start", { ...common, phase: "editing", label: "EDITING", detail: target ? `Editing ${target}` : "Editing code", target })];
+  if (/postreadcode/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: target ? `Read ${target}` : "Code read finished", target })];
+  if (/postwritecode/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: target ? `Updated ${target}` : "Code update finished", target })];
+  if (/preruncommand|premcptooluse/.test(eventName)) {
+    const activity = toolActivity(toolName, command ?? description);
+    return [makeEvent(envelope, payload, activity.status, "command.start", { ...common, ...activity, command, target })];
+  }
+  if (/postruncommand|postmcptooluse/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: command ?? (toolName ? `${toolName} finished` : "Tool result received"), command, tool: toolName, target })];
   if (/pretool|beforetool|toolstart|beforecommand|precommand/.test(eventName)) {
     const activity = toolActivity(toolName, command ?? description);
     return [makeEvent(envelope, payload, activity.status, "command.start", { ...common, ...activity, command })];
   }
   if (/posttool|aftertool|toolend|toolcomplete|aftercommand|postcommand/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: command ?? (toolName ? `${toolName} finished` : "Tool result received"), command, tool: toolName })];
   if (/beforemodel|premodel|userprompt|promptsubmit|promptsubmitted/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "planning", detail: "Planning the next step" })];
-  if (/aftermodel|postmodel|response|thought/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail: "Writing a response" })];
+  if (/aftermodel|postmodel|response|thought/.test(eventName)) return [narrativeEvent(/thought/.test(eventName) ? "reasoning" : "message")];
   if (/upload/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "uploading", label: "UPLOADING", detail: "Uploading a result" })];
   if (/compact|retry|backoff/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "retrying", label: "LOADING", detail: "Preparing more context" })];
   if (/notification/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "notifying", label: "NOTIFYING", detail: text(payload.message) || "Agent notification" })];
@@ -387,7 +456,15 @@ function opencodeEvents(envelope: TelemetryEnvelope) {
   const part = object(payload.part);
   const partState = object(part.state);
   const sessionId = text(payload.sessionID, payload.sessionId, info.sessionID, info.sessionId, part.sessionID, part.sessionId, info.id);
-  const basePayload = { ...payload, sessionId, projectName: text(payload.directory, info.directory) };
+  const parentSessionId = text(payload.parentID, payload.parentId, info.parentID, info.parentId);
+  const basePayload = {
+    ...payload,
+    sessionId,
+    parentSessionId,
+    workstreamId: parentSessionId ?? sessionId,
+    sessionTitle: text(info.title, payload.title),
+    directory: text(payload.directory, info.directory, root.cwd),
+  };
   const openCodeNaturalId = text(root.id, root.timestamp, part.id);
   const common = { identity: openCodeNaturalId ?? `${rawName}|${sessionId}|${text(info.id)}|${stableToken(JSON.stringify({ status: payload.status, partState: part.state, plan: payload.plan }))}|${envelope.receivedAt}`, meta: { rawEventName: rawName } };
   if (eventName === "serverconnected") return [];
@@ -405,20 +482,37 @@ function opencodeEvents(envelope: TelemetryEnvelope) {
   }
   if (/sessiondiff/.test(eventName)) return [makeEvent(envelope, basePayload, "editing", "files.changed", { ...common, phase: "editing", detail: "Updating files" })];
   if (/todoupdated|plan/.test(eventName)) return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(payload.plan, payload.steps, payload.items, info.plan, info.steps) })];
-  if (/commandexecuted/.test(eventName)) return [makeEvent(envelope, basePayload, "command", "command.start", { ...common, phase: "executing", command: text(payload.command), detail: text(payload.command) || "Running a command" })];
+  if (/commandexecuted/.test(eventName)) {
+    const command = text(payload.command, payload.arguments, payload.name);
+    return [makeEvent(envelope, basePayload, "command", "command.start", { ...common, phase: "executing", command, detail: command || "Running a command" })];
+  }
   if (/messagepart/.test(eventName)) {
     const partType = key(part.type);
-    const partCommon = { ...common, identity: `${rawName}|${sessionId}|${text(part.id)}|${partType}` };
-    if (/reasoning|stepstart/.test(partType)) return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...partCommon, phase: "planning", detail: "Reasoning" })];
-    if (/text/.test(partType)) return [makeEvent(envelope, basePayload, "working", "activity", { ...partCommon, phase: "responding", label: "RESPONDING", detail: "Writing a response" })];
+    const partText = text(payload.delta, part.text);
+    const partCommon = { ...common, identity: `${rawName}|${sessionId}|${text(part.id)}|${partType}|${stableToken(partText || "")}` };
+    if (/reasoning|stepstart/.test(partType)) return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", {
+      ...partCommon,
+      phase: "planning",
+      label: "THINKING",
+      detail: partText || "Reasoning",
+      meta: { rawEventName: rawName, activityClass: "narrative", narrativeKind: "reasoning" },
+    })];
+    if (/text/.test(partType)) return [makeEvent(envelope, basePayload, "working", "activity", {
+      ...partCommon,
+      phase: "responding",
+      label: "RESPONDING",
+      detail: partText || "Writing a response",
+      meta: { rawEventName: rawName, activityClass: "narrative", narrativeKind: "message" },
+    })];
     if (/tool/.test(partType)) {
       const toolName = text(part.tool, part.name);
       const state = key(partState.status);
       const toolCommon = { ...partCommon, identity: `${partCommon.identity}|${state || "running"}` };
-      if (/complete/.test(state)) return [makeEvent(envelope, basePayload, "working", "command.end", { ...toolCommon, phase: "receiving", detail: toolName ? `${toolName} finished` : "Tool result received", tool: toolName })];
+      const command = text(object(partState.input).command);
+      if (/complete/.test(state)) return [makeEvent(envelope, basePayload, "working", "command.end", { ...toolCommon, phase: "receiving", detail: command ?? (toolName ? `${toolName} finished` : "Tool result received"), command, tool: toolName })];
       if (/error|failed/.test(state)) return [makeEvent(envelope, basePayload, "error", "error", { ...toolCommon, phase: "failed", detail: text(partState.error) || "Tool failed", tool: toolName })];
-      const activity = toolActivity(toolName);
-      return [makeEvent(envelope, basePayload, activity.status, "command.start", { ...toolCommon, ...activity })];
+      const activity = toolActivity(toolName, command);
+      return [makeEvent(envelope, basePayload, activity.status, "command.start", { ...toolCommon, ...activity, command })];
     }
     if (/subtask|task/.test(partType)) return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: "Starting another agent" })];
   }
@@ -470,7 +564,11 @@ function codexEvents(envelope: TelemetryEnvelope) {
     turnId: text(params.turnId, params.turn_id, turn.id, root.turn_id),
     parentSessionId: text(thread.parentThreadId),
     workstreamId: text(thread.sessionId, thread.parentThreadId, params.threadId, params.thread_id, thread.id, root.thread_id),
-    projectName: text(thread.name, threadCwd?.split(/[\\/]/).filter(Boolean).pop()),
+    // App Server's thread name is the task/chat title, not the project name.
+    // Prefer the workspace directory so the board remains grouped and titled
+    // by the actual project, matching the original Codex session adapter.
+    projectName: text(threadCwd?.split(/[\\/]/).filter(Boolean).pop(), thread.name),
+    sessionTitle: text(thread.name),
     cwd: threadCwd,
     agentName: text(thread.agentNickname, thread.agentRole),
     modelProvider: text(thread.modelProvider),
@@ -508,14 +606,20 @@ function codexEvents(envelope: TelemetryEnvelope) {
     return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: /interrupt/.test(status) ? "Codex turn interrupted" : "Codex turn completed" })];
   }
   if (/planupdated|plan/.test(eventType) || itemType === "plan") return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(item.plan, item.steps, item.items, params.plan, params.steps, root.plan) })];
+  // Text and command-output delta notifications are transport fragments, not
+  // stable activity steps. Promoting each fragment makes the headline flicker
+  // token-by-token and floods the trail. Final item/completed notifications
+  // carry the complete public reasoning summary or agent response below.
+  if (/delta$/.test(eventType)) return [];
   if (/agentmessagedelta|agentmessage/.test(eventType) || itemType === "agentmessage") {
-    const detail = text(params.delta, item.text) || "Writing a response";
+    const detail = text(item.text);
+    if (!detail) return [];
     return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "message" } })];
   }
   if (/reasoning/.test(eventType) || itemType === "reasoning") {
-    const summary = array(item.summary).map((part) => typeof part === "string" ? part : text(object(part).text)).filter((part): part is string => Boolean(part)).join(" ");
-    const detail = text(params.delta, summary) || "Reasoning";
-    return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "reasoning" } })];
+    const summary = uniqueTextParts(item.summary).join(" ");
+    if (!summary) return [];
+    return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail: summary, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "reasoning" } })];
   }
   if (/filechange|patch/.test(eventType) || itemType === "filechange") {
     const changes = array(item.changes).map(object);

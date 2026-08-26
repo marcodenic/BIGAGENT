@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, writeFile } from "node:fs/promises";
 import type { TelemetryHub } from "../telemetry/hub";
 import { removeBigAgentCodexHooks } from "../codex-authority";
 import { findExecutable } from "./executables";
@@ -94,8 +94,37 @@ async function writeAtomic(path: string, contents: string) {
   await rename(temporary, path);
 }
 
+export function unixSocketPeerInodes(socketList: string, socketPath: string) {
+  const peers = new Set<string>();
+  for (const line of socketList.split("\n")) {
+    const pathIndex = line.indexOf(socketPath);
+    if (pathIndex < 0) continue;
+    const fields = line.slice(pathIndex + socketPath.length).trim().split(/\s+/);
+    if (/^\d+$/.test(fields[0] ?? "") && fields[1] === "*" && /^\d+$/.test(fields[2] ?? "")) peers.add(fields[2]);
+  }
+  return peers;
+}
+
+async function sharedDaemonPeerInodes() {
+  const socketPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "app-server-control", "app-server-control.sock");
+  const result = await run("ss", ["-xnpH"], 2_000).catch(() => undefined);
+  return unixSocketPeerInodes(result?.stdout ?? "", socketPath);
+}
+
+async function processSocketInodes(pid: string) {
+  const descriptors = await readdir(`/proc/${pid}/fd`).catch(() => []);
+  const inodes = new Set<string>();
+  await Promise.all(descriptors.map(async (descriptor) => {
+    const target = await readlink(`/proc/${pid}/fd/${descriptor}`).catch(() => "");
+    const match = /^socket:\[(\d+)\]$/.exec(target);
+    if (match) inodes.add(match[1]);
+  }));
+  return inodes;
+}
+
 async function linuxDesktopProcesses() {
   if (process.platform !== "linux") return [] as Array<{ pid: number; shared: boolean }>;
+  const daemonPeers = await sharedDaemonPeerInodes();
   const entries = await readdir("/proc", { withFileTypes: true }).catch(() => []);
   const found: Array<{ pid: number; shared: boolean }> = [];
   for (const entry of entries) {
@@ -104,7 +133,10 @@ async function linuxDesktopProcesses() {
       const command = (await readFile(`/proc/${entry.name}/cmdline`)).toString().split("\0").filter(Boolean);
       if (!command.length || !/(?:ChatGPT|chatgpt)$/.test(command[0]) || command.some((part) => part.startsWith("--type="))) continue;
       const environment = (await readFile(`/proc/${entry.name}/environ`)).toString();
-      found.push({ pid: Number(entry.name), shared: environment.split("\0").includes("CODEX_APP_SERVER_USE_LOCAL_DAEMON=1") });
+      const inheritedMarker = environment.split("\0").includes("CODEX_APP_SERVER_USE_LOCAL_DAEMON=1");
+      const sockets = inheritedMarker ? new Set<string>() : await processSocketInodes(entry.name);
+      const attachedToDaemon = [...sockets].some((inode) => daemonPeers.has(inode));
+      found.push({ pid: Number(entry.name), shared: inheritedMarker || attachedToDaemon });
     } catch {
       // Processes can exit while /proc is being read.
     }
