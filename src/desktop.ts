@@ -2,6 +2,8 @@ export type DesktopApi = {
   platform: "electron";
   getSessions(): Promise<unknown[]>;
   getSnapshot(): Promise<unknown>;
+  getProviders(): Promise<unknown>;
+  providerAction(provider: "codex" | "claude", action: "setup" | "retry" | "launch"): Promise<unknown>;
   imagePreview(path: string): Promise<string>;
   runProcess(command: string, args: string[]): Promise<void>;
   setScreenAwake(active: boolean): Promise<void>;
@@ -10,6 +12,7 @@ export type DesktopApi = {
   onSessions(listener: (payload: unknown) => void): () => void;
   onEvent(listener: (payload: unknown) => void): () => void;
   onSources(listener: (payload: unknown) => void): () => void;
+  onProviders(listener: (payload: unknown) => void): () => void;
 };
 
 export function desktopApi() {

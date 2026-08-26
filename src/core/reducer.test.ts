@@ -21,4 +21,17 @@ describe("display reducer", () => {
     const event = normalizeSimpleEvent({ status: "command", exitCode: 1, detail: "process exited" }, "bad"); const error = reduceEvent(initialState, event);
     expect(error.status).toBe("error"); expect(error.attention).toBe(true); expect(reduceEvent(error, event)).toBe(error);
   });
+  it("enforces lifecycle boundaries when status is omitted", () => {
+    const turnStart = { version: 1 as const, id: "turn-start", timestamp: "", kind: "turn.start" as const };
+    const turnEnd = { version: 1 as const, id: "turn-end", timestamp: "", kind: "turn.end" as const };
+    const sessionEnd = { version: 1 as const, id: "session-end", timestamp: "", kind: "session.end" as const };
+    const active = reduceEvent(initialState, turnStart, 1_000);
+    const turnComplete = reduceEvent(active, turnEnd, 2_000);
+    const complete = reduceEvent(turnComplete, sessionEnd, 3_000);
+    expect(active.status).toBe("thinking");
+    expect(turnComplete).toMatchObject({ status: "complete", label: "DONE", completionScope: "turn" });
+    expect(reduceEvent(initialState, { ...turnEnd, id: "ambient-turn-end" }, 2_000)).toMatchObject({ status: "idle", completionScope: "none" });
+    expect(complete.status).toBe("complete");
+    expect(complete.completionScope).toBe("session");
+  });
 });

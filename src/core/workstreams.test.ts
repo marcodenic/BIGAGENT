@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeSimpleEvent } from "./protocol";
-import { applySessionEvent, groupWorkstreams, replaceSessionSnapshot, replaceSessionSource } from "./workstreams";
+import { activeBoardWorkstreams, applySessionEvent, groupWorkstreams, projectWorkstreamPresentation, replaceSessionSnapshot, replaceSessionSource } from "./workstreams";
 
 function event(sessionId: string, threadId: string, status: "thinking" | "testing" | "waiting" | "complete", detail: string) {
   return normalizeSimpleEvent({ status, detail, meta: { sessionId, threadId, workstreamName: "PROPER LINUX", agentName: `Agent ${sessionId}` } }, sessionId);
@@ -14,6 +14,21 @@ describe("workstream projection", () => {
     expect(workstreams).toHaveLength(1);
     expect(workstreams[0].agents).toHaveLength(2);
     expect(workstreams[0].label).toBe("WORKING");
+  });
+
+  it("keeps tool results in activity without promoting them to the headline", () => {
+    const result = normalizeSimpleEvent({
+      status: "working",
+      phase: "receiving",
+      label: "RESULT RECEIVED",
+      detail: "exec command finished",
+      meta: { sessionId: "01", threadId: "project", workstreamName: "PROPER LINUX" },
+    }, "tool-result");
+    const sessions = applySessionEvent({}, result, 1_000, "codex");
+    const [workstream] = groupWorkstreams(sessions, 1_000);
+    expect(workstream.label).toBe("WORKING");
+    expect(workstream.phase).toBe("receiving");
+    expect(workstream.agents[0].state.recent[0]).toMatchObject({ label: "RESULT RECEIVED", detail: "exec command finished" });
   });
 
   it("marks attention without making stable workstream rows jump", () => {
@@ -32,6 +47,63 @@ describe("workstream projection", () => {
     const [workstream] = groupWorkstreams(sessions, 2_000, Number.POSITIVE_INFINITY);
     expect(workstream.status).toBe("thinking");
     expect(workstream.attention).toBe(false);
+  });
+
+  it("keeps a root error visible and actionable until the session resumes", () => {
+    const failed = normalizeSimpleEvent({ status: "error", detail: "Agent crashed", meta: { sessionId: "root", threadId: "project" } }, "failed");
+    const sessions = applySessionEvent({}, failed, 1_000, "codex-hooks");
+    const workstreams = groupWorkstreams(sessions, 120_000);
+    const board = activeBoardWorkstreams(workstreams);
+    expect(workstreams[0]).toMatchObject({ status: "error", attention: true });
+    expect(board[0].agents[0]).toMatchObject({ id: "root", state: { status: "error" } });
+  });
+
+  it("keeps a recently completed sibling on a live workstream board", () => {
+    const done = normalizeSimpleEvent({
+      status: "complete",
+      detail: "Review finished",
+      meta: { sessionId: "child", threadId: "project", parentSessionId: "parent", workstreamName: "PROPER LINUX" },
+    }, "child-done");
+    const running = event("parent", "project", "thinking", "Integrating review");
+    let sessions = applySessionEvent({}, done, 1_000, "codex-hooks");
+    sessions = applySessionEvent(sessions, running, 2_000, "codex-hooks");
+    const board = activeBoardWorkstreams(groupWorkstreams(sessions, 2_000));
+    expect(board).toHaveLength(1);
+    expect(board[0].agents.map((agent) => [agent.id, agent.state.status])).toEqual([
+      ["child", "complete"],
+      ["parent", "thinking"],
+    ]);
+  });
+
+  it("keeps a completed child visible when its parent becomes turn-idle", () => {
+    const done = normalizeSimpleEvent({
+      status: "complete",
+      detail: "Review finished",
+      meta: { sessionId: "child", threadId: "project", parentSessionId: "parent", workstreamName: "PROPER LINUX" },
+    }, "child-done");
+    const idle = normalizeSimpleEvent({ status: "idle", detail: "Turn finished", meta: { sessionId: "parent", threadId: "project" } }, "parent-idle");
+    let sessions = applySessionEvent({}, done, 1_000, "codex-hooks");
+    sessions = applySessionEvent(sessions, idle, 2_000, "codex-hooks");
+    const board = activeBoardWorkstreams(groupWorkstreams(sessions, 2_000));
+    expect(board).toHaveLength(1);
+    expect(board[0].agents.map((agent) => [agent.id, agent.state.status])).toEqual([["child", "complete"]]);
+  });
+
+  it("does not present turn-idle as completed work", () => {
+    const idle = normalizeSimpleEvent({ status: "idle", detail: "Turn finished", meta: { sessionId: "parent", threadId: "project" } }, "idle");
+    const sessions = applySessionEvent({}, idle, 1_000, "codex-hooks");
+    expect(groupWorkstreams(sessions, 1_000)).toEqual([]);
+  });
+
+  it("keeps a completed root turn on the board without claiming the session ended", () => {
+    const started = { ...normalizeSimpleEvent({ status: "thinking", meta: { sessionId: "root", threadId: "project" } }, "turn-start"), kind: "turn.start" as const };
+    const stopped = { ...normalizeSimpleEvent({ status: "idle", detail: "Turn finished", meta: { sessionId: "root", threadId: "project" } }, "turn-stop"), kind: "turn.end" as const };
+    let sessions = applySessionEvent({}, started, 1_000, "codex-hooks");
+    sessions = applySessionEvent(sessions, stopped, 2_000, "codex-hooks");
+    const presentation = projectWorkstreamPresentation(groupWorkstreams(sessions, 2_000), 2_000);
+    expect(presentation.boardWorkstreams[0].agents[0].state).toMatchObject({ status: "complete", completionScope: "turn" });
+    expect(presentation.completedRootAgents).toEqual([]);
+    expect(presentation.recentlyDone).toBe(1);
   });
 
   it("reconciles snapshots and ages completed work out", () => {
@@ -94,5 +166,34 @@ describe("workstream projection", () => {
     const done = normalizeSimpleEvent({ status: "complete", detail: "Finished", meta: { sessionId: "01", threadId: "project", lastMessage: "Implemented the adaptive board." } }, "done");
     const sessions = applySessionEvent({}, done, 1_000, "codex");
     expect(sessions["01"].lastMessage).toBe("Implemented the adaptive board.");
+  });
+
+  it("preserves child grouping and model metadata across sparse later events", () => {
+    const started = normalizeSimpleEvent({
+      status: "thinking",
+      meta: {
+        sessionId: "child",
+        parentSessionId: "root",
+        workstreamId: "root",
+        workstreamName: "PROJECT",
+        model: "gpt-test",
+      },
+    }, "started");
+    const finished = normalizeSimpleEvent({ status: "complete", meta: { sessionId: "child" } }, "finished");
+    let sessions = applySessionEvent({}, started, 1_000, "codex-app-server");
+    sessions = applySessionEvent(sessions, finished, 2_000, "codex-app-server");
+    expect(sessions.child).toMatchObject({ parentSessionId: "root", workstreamId: "root", workstreamName: "PROJECT", model: "gpt-test" });
+  });
+
+  it("projects renderer lifecycle states from one shared policy", () => {
+    const active = normalizeSimpleEvent({ status: "thinking", meta: { sessionId: "root", threadId: "project" } }, "active");
+    const childDone = normalizeSimpleEvent({ status: "complete", meta: { sessionId: "child", parentSessionId: "root", threadId: "project" } }, "child-done");
+    let sessions = applySessionEvent({}, active, 1_000, "codex-hooks");
+    sessions = applySessionEvent(sessions, childDone, 2_000, "codex-hooks");
+    const presentation = projectWorkstreamPresentation(groupWorkstreams(sessions, 2_000), 2_000);
+    expect(presentation.liveAgents).toHaveLength(1);
+    expect(presentation.boardWorkstreams[0].agents).toHaveLength(2);
+    expect(presentation.completedRootAgents).toEqual([]);
+    expect(presentation.recentlyDone).toBe(1);
   });
 });

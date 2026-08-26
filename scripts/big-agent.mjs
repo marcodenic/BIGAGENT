@@ -6,15 +6,25 @@ const configuredUrl = process.env.BIG_AGENT_URL || "http://127.0.0.1:19777/event
 const serverUrl = new URL(configuredUrl);
 serverUrl.pathname = serverUrl.pathname === "/event" ? "" : serverUrl.pathname.replace(/\/$/, "");
 
-async function post(path, value, headers = {}) {
+async function post(path, value, headers = {}, timeoutMs) {
   const endpoint = new URL(serverUrl);
   endpoint.pathname = `${serverUrl.pathname.replace(/\/$/, "")}${path}`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(value),
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   if (!response.ok) throw new Error(`BIG AGENT returned ${response.status}: ${await response.text()}`);
+}
+
+function hookOutput(value) {
+  const eventName = String(value?.hook_event_name ?? value?.hookEventName ?? "")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "");
+  // Stop hooks require JSON output. PreToolUse and PermissionRequest reject
+  // the shared `continue` field, so successful observation must stay silent
+  // for every other event.
+  return eventName === "stop" || eventName === "subagentstop" ? '{"continue":true}\n' : "";
 }
 
 async function send(value) {
@@ -82,24 +92,27 @@ if (verb === "emit") {
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => { input += chunk; });
   process.stdin.on("end", async () => {
+    let payload = {};
     try {
-      await post(`/hooks/${encodeURIComponent(provider)}`, input.trim() ? JSON.parse(input) : {});
-      process.stdout.write('{"continue":true}\n');
+      payload = input.trim() ? JSON.parse(input) : {};
+      await post(`/hooks/${encodeURIComponent(provider)}`, payload, {}, 1_000);
     } catch (error) {
       // Monitoring must never block the host agent's lifecycle.
       console.error(`BIG AGENT hook unavailable: ${error.message}`);
-      process.stdout.write('{"continue":true}\n');
     }
+    process.stdout.write(hookOutput(payload));
   });
 } else if (verb === "run" && rest[0] === "--" && rest[1]) {
   const [command, ...args] = rest.slice(1);
-  await send({ status: "command", phase: "executing", command: [command, ...args].join(" "), label: "RUNNING" });
+  const runId = crypto.randomUUID();
+  const meta = { sessionId: `process:${runId}`, runId, workstreamId: `process:${runId}`, agentName: "Process" };
+  await send({ status: "command", phase: "executing", command: [command, ...args].join(" "), label: "RUNNING", meta });
   const child = spawn(command, args, { stdio: "inherit" });
-  child.on("error", async (error) => { await send({ status: "error", phase: "failed", detail: error.message }); process.exitCode = 1; });
+  child.on("error", async (error) => { await send({ status: "error", phase: "failed", detail: error.message, meta }); process.exitCode = 1; });
   child.on("exit", async (code) => {
     await send(code === 0
-      ? { status: "complete", phase: "completing", detail: "Process completed" }
-      : { status: "error", phase: "failed", detail: `Process exited with code ${code}`, exitCode: code });
+      ? { status: "complete", phase: "completing", detail: "Process completed", meta }
+      : { status: "error", phase: "failed", detail: `Process exited with code ${code}`, exitCode: code, meta });
     process.exitCode = code ?? 1;
   });
 } else if (verb === "codex" && rest[0] === "--" && rest[1]) {
@@ -116,7 +129,7 @@ if (verb === "emit") {
     "Usage:",
     "  big-agent emit '{\"status\":\"thinking\"}'",
     "  big-agent pipe < events.jsonl",
-    "  big-agent hook <claude|cursor|gemini|grok|cline|windsurf>",
+    "  big-agent hook <codex|claude|cursor|gemini|grok|cline|windsurf>",
     "  big-agent run -- <command> [args]",
     "  big-agent codex -- codex exec <prompt>",
     "  big-agent proxy codex-app-server -- codex app-server",

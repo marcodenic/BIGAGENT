@@ -5,6 +5,13 @@ import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
 import { desktopApi, exitAppFullscreen, toggleAppFullscreen } from "./desktop";
 import { formatElapsed } from "./core/reducer";
 import type { AgentEvent, AgentStatus } from "./core/protocol";
+import {
+  observableProviders,
+  providerStatusPresentation,
+  visibleProviderMessage,
+  type ProviderAction,
+  type ProviderHealth,
+} from "./core/providerPresentation";
 import openaiIcon from "@lobehub/icons-static-svg/icons/openai.svg?raw";
 import claudeIcon from "@lobehub/icons-static-svg/icons/claude.svg?raw";
 import geminiIcon from "@lobehub/icons-static-svg/icons/gemini.svg?raw";
@@ -15,12 +22,31 @@ import "@fontsource-variable/geist-mono";
 import {
   applySessionEvent,
   groupWorkstreams,
-  isActiveStatus,
+  projectWorkstreamPresentation,
   replaceSessionSnapshot,
   type AgentSession,
   type Workstream,
 } from "./core/workstreams";
 import "./styles.css";
+
+const PROVIDER_ONBOARDING_KEY = "big-agent.provider-onboarding.v1";
+
+function providerOnboardingComplete() {
+  try { return window.localStorage.getItem(PROVIDER_ONBOARDING_KEY) === "complete"; } catch { return false; }
+}
+
+function rememberProviderOnboarding() {
+  try { window.localStorage.setItem(PROVIDER_ONBOARDING_KEY, "complete"); } catch { /* The next launch will show discovery again. */ }
+}
+
+function providerHealthList(value: unknown): ProviderHealth[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is ProviderHealth => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item as Partial<ProviderHealth>;
+    return (candidate.id === "codex" || candidate.id === "claude") && typeof candidate.detail === "string" && Array.isArray(candidate.actions);
+  });
+}
 
 function faceHash(value: string) {
   let hash = 2166136261;
@@ -42,22 +68,6 @@ function useClock() {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
-  return now;
-}
-
-function useDeadlineClock(deadline: number) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const current = Date.now();
-    setNow(current);
-    if (deadline <= current) return;
-    const timer = window.setInterval(() => {
-      const next = Date.now();
-      setNow(next);
-      if (next >= deadline) window.clearInterval(timer);
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, [deadline]);
   return now;
 }
 
@@ -184,18 +194,17 @@ type RenderedActivity = {
 
 const ACTIVITY_EXIT_MS = 300;
 
-function readableTool(tool: string) {
-  return tool.replaceAll("_", " ").replaceAll("-", " ").trim();
-}
-
 function headlineDetail(step: ActivityStep) {
   if (step.narrativeKind) return step.detail;
-  if (step.phase === "receiving" || step.label === "RESULT RECEIVED") return step.tool ? `${readableTool(step.tool)} finished` : "Processing a result";
+  if (step.phase === "receiving" || step.label === "RESULT RECEIVED") return "Processing a result";
   if (step.status === "testing") return "Running the test suite";
   if (step.status === "editing") return step.target ? `Updating ${step.target.split(/[\\/]/).pop()}` : "Updating the implementation";
   if (step.status === "searching") return step.target ? `Inspecting ${step.target.split(/[\\/]/).pop()}` : "Inspecting the current state";
   if (step.phase === "delegating") return "Coordinating another agent";
-  if (step.status === "command" || step.phase === "executing") return step.tool ? `Using ${readableTool(step.tool)}` : "Running a command";
+  // Command bodies belong in the compact telemetry trail. Promoting them to
+  // the room-scale headline makes observation plumbing look like reasoning,
+  // particularly for providers that have not emitted narrative text yet.
+  if (step.status === "command" || step.phase === "executing") return "Executing the current step";
   return step.detail;
 }
 
@@ -473,7 +482,7 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
   const agentNames = [...new Set(workstream.agents.map((agent) => agent.agentName))];
   const agentLabel = `${agentNames[0] ?? "AGENT"}${agentNames.length > 1 ? ` +${agentNames.length - 1}` : ""}`;
-  return <article className={`workstream status-${workstream.status} ${workstream.attention ? "needs-attention" : ""}`}>
+  return <article className={`workstream status-${workstream.status} ${workstream.agents.length === 1 ? "single-agent" : ""} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
       <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
       <div className="identity-meta">
@@ -510,30 +519,87 @@ function CompletionSummary({ agents, privacy }: { agents: AgentSession[]; privac
   </section>;
 }
 
+function ProviderDiscovery({ providers, busy, onboarding, onAction, onContinue }: {
+  providers: ProviderHealth[];
+  busy: string;
+  onboarding: boolean;
+  onAction: (provider: ProviderHealth["id"], action: ProviderAction["id"]) => void;
+  onContinue: () => void;
+}) {
+  const visible = observableProviders(providers);
+  const discovering = providers.length === 0;
+  const found = visible.length > 0;
+  return <section className="empty-state provider-ready-state" aria-live="polite">
+    <i className={`idle-dot ${found ? "is-live" : ""}`} />
+    <h1>FIND MY AGENTS</h1>
+    <p className="provider-intro">Checking supported agent connections on this machine</p>
+    <div className="provider-readiness" aria-label="Agent provider telemetry status">
+      {providers.map((provider) => {
+        const status = providerStatusPresentation(provider.state);
+        return <article key={provider.id} className={`provider-health state-${provider.state}`}>
+          <div className="provider-health-heading">
+            <span className={`provider-health-logo provider-${provider.id}`} dangerouslySetInnerHTML={{ __html: provider.id === "codex" ? openaiIcon : claudeIcon }} />
+            <div><b>{provider.label}</b><small>{provider.transport}</small></div>
+            <span className={`provider-status-chip tone-${status.tone}`}><i aria-hidden="true" />{status.label}</span>
+          </div>
+          <p>{provider.detail}</p>
+          {provider.actions.length > 0 && <div className="provider-actions">{provider.actions.map((action) => {
+            const key = `${provider.id}:${action.id}`;
+            return <button key={action.id} disabled={busy === key} onClick={() => onAction(provider.id, action.id)}>{busy === key ? "WORKING…" : action.label}</button>;
+          })}</div>}
+        </article>;
+      })}
+      {providers.length === 0 && <article className="provider-health state-connecting"><div className="provider-health-heading"><div><b>DISCOVERING PROVIDERS</b><small>LOCAL TELEMETRY</small></div><span className="provider-status-chip tone-neutral"><i aria-hidden="true" />CONNECTING</span></div><p>Checking Codex App Server and Claude hooks</p></article>}
+    </div>
+    <div className={`provider-discovery-result ${found ? "has-agents" : discovering ? "is-discovering" : "has-no-agents"}`}>
+      <div className="empty-face provider-ready-face"><FaceVisual
+        status={found ? "complete" : "idle"}
+        phase={found ? "completing" : "idle"}
+        label={found ? "FOUND" : discovering ? "SEARCHING" : "NO AGENTS"}
+        seed={found ? 29 : 17}
+        personality={found ? 1 : 7}
+        attention={false}
+        shape={found ? "blob" : discovering ? "egg" : "wedge"}
+        color={found ? "green" : discovering ? "gray" : "red"}
+        expression={found ? "celebrate" : discovering ? "radar" : "confused"}
+      /></div>
+      <p>{discovering ? "Looking for supported agents…" : visibleProviderMessage(providers)}</p>
+    </div>
+    <button className="provider-continue" onClick={onContinue}>{onboarding ? "CONTINUE TO BIGAGENT" : "DONE"}</button>
+  </section>;
+}
+
+function OperationalReady() {
+  return <section className="empty-state operational-ready" aria-live="polite">
+    <i className="idle-dot" />
+    <h1>READY</h1>
+    <p>Waiting for an agent</p>
+    <div className="empty-face"><FaceVisual status="idle" phase="idle" label="READY" seed={41} personality={3} attention={false} shape="egg" color="blue" expression="idle" /></div>
+  </section>;
+}
+
 function App() {
   const [sessions, setSessions] = useState<Record<string, AgentSession>>({});
   const [inspection, setInspection] = useState(false);
   const [help, setHelp] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const [providers, setProviders] = useState<ProviderHealth[]>([]);
+  const [providerBusy, setProviderBusy] = useState("");
+  const [providerOnboardingDone, setProviderOnboardingDone] = useState(providerOnboardingComplete);
+  const [providerSetupOpen, setProviderSetupOpen] = useState(() => !providerOnboardingComplete());
   const now = useClock();
   const viewport = useViewport();
   const workstreams = useMemo(() => groupWorkstreams(sessions, now), [sessions, now]);
-  const activeAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => isActiveStatus(agent.state.status));
-  const isLiveAgent = (agent: AgentSession) => isActiveStatus(agent.state.status);
-  const liveWorkstreams = workstreams.filter((workstream) => workstream.agents.some(isLiveAgent));
-  const liveAgents = workstreams.flatMap((workstream) => workstream.agents).filter(isLiveAgent);
-  const attentionCount = liveAgents.filter((agent) => agent.state.attention).length;
-  const completedAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => agent.state.status === "complete");
-  const recentDeadline = Math.max(0, ...workstreams
-    .filter((workstream) => workstream.status === "complete")
-    .map((workstream) => (workstream.endedAt ?? workstream.updatedAt) + 20_000));
-  const recentNow = useDeadlineClock(recentDeadline);
-  const recentlyDone = workstreams.filter((workstream) => workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000).length;
-  const boardWorkstreams = liveWorkstreams.map((workstream) => ({
-    ...workstream,
-    agents: workstream.agents.filter(isLiveAgent),
-  }));
+  const {
+    activeAgents,
+    liveWorkstreams,
+    liveAgents,
+    attentionCount,
+    completedRootAgents,
+    recentlyDone,
+    boardWorkstreams,
+  } = useMemo(() => projectWorkstreamPresentation(workstreams, now), [workstreams, now]);
   const boardAgents = boardWorkstreams.flatMap((workstream) => workstream.agents);
   const useAgentTiles = boardAgents.length > 5;
   const displayWorkstreams = useAgentTiles
@@ -586,13 +652,42 @@ function App() {
   useEffect(() => {
     const desktop = desktopApi();
     if (!desktop) return;
+    let disposed = false;
+    const update = (payload: unknown) => { if (!disposed) setProviders(providerHealthList(payload)); };
+    const stop = desktop.onProviders(update);
+    desktop.getProviders().then(update).catch((error) => {
+      if (!disposed) setSyncError(error instanceof Error ? error.message : String(error));
+    });
+    return () => { disposed = true; stop(); };
+  }, []);
+
+  const providerAction = (provider: ProviderHealth["id"], action: ProviderAction["id"]) => {
+    const desktop = desktopApi();
+    if (!desktop) return;
+    const key = `${provider}:${action}`;
+    setProviderBusy(key);
+    setSyncError("");
+    desktop.providerAction(provider, action).then((payload) => setProviders(providerHealthList(payload))).catch((error) => {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }).finally(() => setProviderBusy(""));
+  };
+
+  const finishProviderSetup = () => {
+    rememberProviderOnboarding();
+    setProviderOnboardingDone(true);
+    setProviderSetupOpen(false);
+  };
+
+  useEffect(() => {
+    const desktop = desktopApi();
+    if (!desktop) return;
     desktop.setScreenAwake(liveAgents.length > 0).catch(() => undefined);
   }, [liveAgents.length]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "f") toggleAppFullscreen().catch(() => undefined);
-      if (event.key === "Escape") { exitAppFullscreen().catch(() => undefined); setHelp(false); }
+      if (event.key === "Escape") { exitAppFullscreen().catch(() => undefined); setHelp(false); setProviderSetupOpen(false); }
       if (event.key.toLowerCase() === "i") setInspection((value) => !value);
       if (event.key === "?") setHelp((value) => !value);
     };
@@ -602,28 +697,35 @@ function App() {
 
   const summary = liveWorkstreams.length > 0
     ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.length, "AGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
-    : completedAgents.length > 0
-      ? <CompletedHeaderSummary agents={completedAgents} />
+    : boardWorkstreams.length > 0
+      ? attentionCount
+        ? `${plural(boardWorkstreams.length, "WORKSTREAM")} · ${attentionCount} NEEDS YOU`
+        : `${plural(boardWorkstreams.length, "WORKSTREAM")} · ${recentlyDone} RECENTLY DONE`
+    : completedRootAgents.length > 0
+      ? <CompletedHeaderSummary agents={completedRootAgents} />
       : "WAITING FOR AN AGENT";
 
   return <main className={`app board-count-${Math.min(Math.max(displayWorkstreams.length, 1), 9)} ${useAgentTiles ? "agent-tile-board" : ""} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
     <header>
       <div className="brand"><span className="brand-face">-_</span><b>BIG AGENT</b></div>
-      <div className="summary">{summary}</div>
+      <div className="summary">{providerSetupOpen ? "AGENT CONNECTIONS" : summary}</div>
       <div className="header-actions">
+        <button className={`agents-toggle ${providerSetupOpen ? "is-active" : ""}`} onClick={() => { setInspection(false); setProviderSetupOpen((value) => !value); }} aria-label="Manage agent connections">{providerSetupOpen ? "BACK" : "AGENTS"}</button>
         <button className="fullscreen-toggle" onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Toggle fullscreen (F)">⛶</button>
-        <button onClick={() => setInspection((value) => !value)} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
+        <button onClick={() => { setProviderSetupOpen(false); setInspection((value) => !value); }} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
       </div>
     </header>
 
-    {displayWorkstreams.length > 0
+    {providerSetupOpen
+      ? <ProviderDiscovery providers={providers} busy={providerBusy} onboarding={!providerOnboardingDone} onAction={providerAction} onContinue={finishProviderSetup} />
+      : displayWorkstreams.length > 0
       ? <section className="workstream-board" aria-live="polite">{displayWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.id)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
-      : completedAgents.length > 0
-        ? <CompletionSummary agents={completedAgents} privacy={privacy} />
-      : <section className="empty-state" aria-live="polite"><i className="idle-dot" /><h1>READY</h1><p>Waiting for an agent</p><div className="empty-face"><FaceVisual status="idle" phase="idle" label="READY" seed={41} personality={3} attention={false} /></div></section>}
+      : completedRootAgents.length > 0
+        ? <CompletionSummary agents={completedRootAgents} privacy={privacy} />
+        : <OperationalReady />}
 
     <footer>
-      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : displayWorkstreams.length ? "LIVE WORKSTREAMS" : completedAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>
+      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : providerSetupOpen ? "PROVIDER DISCOVERY" : displayWorkstreams.length ? "LIVE WORKSTREAMS" : completedRootAgents.length ? "COMPLETED WORK" : "AMBIENT MODE"}</span>
       <div className="controls">
         <button onClick={() => setPrivacy((value) => !value)}>{privacy ? "PRIVATE" : "OPEN"}</button>
       </div>

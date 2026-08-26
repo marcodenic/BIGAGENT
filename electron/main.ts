@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import type { Server } from "node:http";
 import { extname, isAbsolute, join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from "electron";
 import { codexDesktopSessions, codexDesktopSnapshot, codexSourceSignature } from "./codex-sessions";
+import { ClaudeProvider } from "./providers/claude";
+import { CodexAppServerProvider } from "./providers/codex-app-server";
+import type { ProviderHealth, ProviderId } from "./providers/types";
 import { TelemetryHub } from "./telemetry/hub";
 import { startOpenCodeSource } from "./telemetry/opencode";
 import { createTelemetryServer, listenTelemetryServer } from "./telemetry/server";
@@ -52,13 +56,22 @@ let protocolServer: Server | null = null;
 let watcherTimer: NodeJS.Timeout | null = null;
 let wakeLockId: number | null = null;
 let stopOpenCodeSource: (() => void) | null = null;
+let codexProvider: CodexAppServerProvider | null = null;
+let claudeProvider: ClaudeProvider | null = null;
 let previousSignature = "";
 let previousSessions = "";
 let safetyRefreshAt = 0;
 const telemetryHub = new TelemetryHub();
+const allowCodexFallback = process.env.BIG_AGENT_CODEX_FALLBACK === "1";
+const providerHealth = new Map<ProviderId, ProviderHealth>();
 
 function send(channel: string, payload: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function updateProviderHealth(health: ProviderHealth) {
+  providerHealth.set(health.id, health);
+  send("big-agent:providers", [...providerHealth.values()]);
 }
 
 function setScreenAwake(active: boolean) {
@@ -86,13 +99,17 @@ function emitProcessEvent(payload: unknown) {
 function runProcess(command: string, args: string[]) {
   if (!command.trim()) throw new Error("command is required");
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+  const runId = randomUUID();
+  const meta = { sessionId: `process:${runId}`, runId, workstreamId: `process:${runId}`, agentName: "Process" };
+  let outputOrdinal = 0;
   emitProcessEvent({
     version: 1,
-    id: `process-start-${child.pid || Date.now()}`,
+    id: `process-${runId}-start`,
     timestamp: "",
     kind: "command.start",
     status: "command",
     command: [command, ...args].join(" "),
+    meta,
   });
   child.stdout.setEncoding("utf8");
   let buffer = "";
@@ -101,17 +118,20 @@ function runProcess(command: string, args: string[]) {
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
     for (const line of lines.filter(Boolean)) {
-      emitProcessEvent({ version: 1, id: `stdout-${Date.now()}-${line.length}`, timestamp: "", kind: "activity", status: "working", detail: line });
+      outputOrdinal += 1;
+      emitProcessEvent({ version: 1, id: `process-${runId}-stdout-${outputOrdinal}`, timestamp: "", kind: "activity", status: "working", detail: line, meta });
     }
   });
-  child.on("error", (error) => emitProcessEvent({ version: 1, id: "process-launch-error", timestamp: "", kind: "error", status: "error", detail: error.message }));
+  child.on("error", (error) => emitProcessEvent({ version: 1, id: `process-${runId}-launch-error`, timestamp: "", kind: "error", status: "error", detail: error.message, meta }));
   child.on("exit", (code) => emitProcessEvent(code === 0
-    ? { version: 1, id: "process-complete", timestamp: "", kind: "complete", status: "complete", detail: "Process completed" }
-    : { version: 1, id: "process-error", timestamp: "", kind: "error", status: "error", detail: `Process exited with code ${code ?? -1}`, exitCode: code }));
+    ? { version: 1, id: `process-${runId}-complete`, timestamp: "", kind: "complete", status: "complete", detail: "Process completed", meta }
+    : { version: 1, id: `process-${runId}-error`, timestamp: "", kind: "error", status: "error", detail: `Process exited with code ${code ?? -1}`, exitCode: code, meta }));
 }
 
 function refreshSessions(force = false) {
-  const signature = codexSourceSignature();
+  if (!allowCodexFallback) return;
+  const telemetryAuthoritative = hasCodexTelemetry();
+  const signature = telemetryAuthoritative ? "telemetry-authoritative" : codexSourceSignature();
   const now = Date.now();
   if (!force && signature === previousSignature && now < safetyRefreshAt) return;
   try {
@@ -124,6 +144,10 @@ function refreshSessions(force = false) {
     }
     previousSignature = signature;
     safetyRefreshAt = now + 15_000;
+    if (telemetryAuthoritative && watcherTimer) {
+      clearInterval(watcherTimer);
+      watcherTimer = null;
+    }
   } catch (error) {
     telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", "error", error instanceof Error ? error.message : String(error));
     console.error("Codex session refresh failed:", error);
@@ -131,12 +155,24 @@ function refreshSessions(force = false) {
 }
 
 function startSessionWatcher() {
+  if (!allowCodexFallback) return;
   refreshSessions(true);
   watcherTimer = setInterval(refreshSessions, 250);
   watcherTimer.unref();
 }
 
+function hasCodexTelemetry() {
+  return Object.keys(telemetryHub.eventsBySource()).some((source) =>
+    source === "codex-hooks" || source === "codex-app-server" || source === "codex-json"
+  );
+}
+
 function codexFallbackEvents() {
+  // Rollout parsing is only a bootstrap fallback. As soon as Codex emits a
+  // supported lifecycle event, that feed is authoritative for this process.
+  // Keeping both sources visible lets an unrelated stale rollout survive even
+  // though the live feed correctly completed the current turn.
+  if (!allowCodexFallback || hasCodexTelemetry()) return [];
   return codexDesktopSessions().map((event) => ({
     ...event,
     meta: { ...(event.meta && typeof event.meta === "object" ? event.meta : {}), source: "codex-desktop-fallback", product: "codex", transport: "rollout-jsonl-fallback" },
@@ -150,6 +186,8 @@ function allSessionEvents() {
 function startProtocolServer() {
   protocolServer = createTelemetryServer(telemetryHub);
   protocolServer.on("error", (error) => console.error("Protocol server unavailable:", error.message));
+  protocolServer.on("listening", () => claudeProvider?.setReceiverListening(true));
+  protocolServer.on("close", () => claudeProvider?.setReceiverListening(false));
   listenTelemetryServer(protocolServer);
 }
 
@@ -159,7 +197,15 @@ function windowForEvent(event: Electron.IpcMainInvokeEvent) {
 
 function registerIpc() {
   ipcMain.handle("big-agent:get-sessions", () => allSessionEvents());
-  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), legacy: codexDesktopSnapshot() }));
+  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: [...providerHealth.values()], legacy: allowCodexFallback ? codexDesktopSnapshot() : null }));
+  ipcMain.handle("big-agent:get-providers", () => [...providerHealth.values()]);
+  ipcMain.handle("big-agent:provider-action", async (_event, provider: ProviderId, action: "setup" | "retry" | "launch") => {
+    if (!(["codex", "claude"] as string[]).includes(provider)) throw new Error("Unknown provider");
+    if (!(["setup", "retry", "launch"] as string[]).includes(action)) throw new Error("Unknown provider action");
+    if (provider === "codex") await codexProvider?.action(action);
+    else await claudeProvider?.action(action);
+    return [...providerHealth.values()];
+  });
   ipcMain.handle("big-agent:image-preview", (_event, path: string) => imagePreview(path));
   ipcMain.handle("big-agent:run-process", (_event, command: string, args: string[]) => runProcess(command, args));
   ipcMain.handle("big-agent:set-screen-awake", (_event, active: boolean) => setScreenAwake(Boolean(active)));
@@ -193,6 +239,7 @@ async function createWindow() {
   mainWindow.on("maximize", () => mainWindow?.setAlwaysOnTop(true));
   mainWindow.on("unmaximize", () => mainWindow?.setAlwaysOnTop(false));
   mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.webContents.on("did-finish-load", () => send("big-agent:providers", [...providerHealth.values()]));
   // Map the native surface before Chromium initializes its Vulkan compositor.
   // A hidden X11 window has no usable geometry for Vulkan surface creation.
   mainWindow.maximize();
@@ -214,12 +261,24 @@ else {
 
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
+    codexProvider = new CodexAppServerProvider(telemetryHub, updateProviderHealth);
+    claudeProvider = new ClaudeProvider(telemetryHub, updateProviderHealth);
     registerIpc();
-    telemetryHub.onEvent((event) => send("big-agent:event", event));
+    telemetryHub.onEvent((event) => {
+      send("big-agent:event", event);
+      if (event.meta?.product === "claude" && event.meta?.source === "claude-hooks") claudeProvider?.noteHookEvent();
+      if (event.meta?.product === "codex" && event.meta?.source !== "codex-desktop-fallback") {
+        // Clear the renderer's authoritative fallback snapshot immediately;
+        // source priority alone cannot remove a stale row with a different id.
+        refreshSessions(true);
+      }
+    });
     telemetryHub.onHealth((sources) => send("big-agent:sources", sources));
     startProtocolServer();
     await createWindow();
     startSessionWatcher();
+    void codexProvider.start();
+    void claudeProvider.start();
     stopOpenCodeSource = startOpenCodeSource(telemetryHub);
     setTimeout(() => console.info("Electron GPU feature status:", app.getGPUFeatureStatus()), 3_000).unref();
   }).catch((error) => {
@@ -233,6 +292,8 @@ app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(
 app.on("before-quit", () => {
   if (watcherTimer) clearInterval(watcherTimer);
   stopOpenCodeSource?.();
+  codexProvider?.stop();
+  claudeProvider?.stop();
   protocolServer?.close();
   setScreenAwake(false);
 });

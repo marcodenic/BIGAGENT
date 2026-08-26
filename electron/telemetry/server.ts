@@ -88,7 +88,16 @@ export function createTelemetryServer(hub: TelemetryHub) {
       }
       const events = ingestMany(hub, envelope, payload);
       const isOtlp = url.pathname.startsWith("/v1/");
-      json(response, isOtlp ? 200 : 202, isOtlp ? {} : { status: "accepted", events: events.length, continue: true });
+      const isHook = url.pathname.startsWith("/hooks/");
+      if (isHook) {
+        // Observation hooks must have zero behavioral effect. Claude documents
+        // an empty 2xx response as the neutral HTTP-hook result; returning JSON
+        // control fields here would make BIG AGENT part of the agent decision.
+        response.writeHead(204, { "cache-control": "no-store" });
+        response.end();
+      } else {
+        json(response, isOtlp ? 200 : 202, isOtlp ? {} : { status: "accepted", events: events.length });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       json(response, message.includes("too large") ? 413 : 400, { status: "invalid request", detail: message });

@@ -1,17 +1,31 @@
 import type { AgentEvent, AgentPhase, AgentStatus } from "./protocol";
 
+export type CompletionScope = "none" | "turn" | "session";
+
 export interface DisplayState {
   status: AgentStatus; label: string; detail: string; files: string[]; plan: string[]; recent: AgentEvent[];
   startedAt: number | null; stateSince: number; endedAt: number | null; attention: boolean; error: string | null;
-  sessionName: string; project: string; branch: string; command: string; tool: string; target: string; phase: AgentPhase; usage?: AgentEvent["usage"];
+  sessionName: string; project: string; branch: string; command: string; tool: string; target: string; phase: AgentPhase;
+  completionScope: CompletionScope; usage?: AgentEvent["usage"];
 }
-export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "", phase: "idle" };
+export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "", phase: "idle", completionScope: "none" };
 const labels: Record<AgentStatus, string> = { idle: "READY", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "RUNNING", editing: "EDITING", testing: "RUNNING TESTS", waiting: "NEEDS YOU", approval: "NEEDS YOU", complete: "DONE", error: "SOMETHING BROKE" };
 const active = new Set<AgentStatus>(["thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval"]);
 export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.now()): DisplayState {
   if (state.recent.some((x) => x.id === event.id)) return state;
   const next: DisplayState = { ...state, recent: [event, ...state.recent].slice(0, 80), usage: event.usage ?? state.usage };
   let status = event.status ?? state.status;
+  // Boundary kinds are authoritative even when a producer omits the optional
+  // status field. A turn ending is transiently presentable as DONE without
+  // being promoted to a completed session.
+  if (event.kind === "session.start" && event.status === undefined) status = "idle";
+  if (event.kind === "turn.start" && event.status === undefined) status = "thinking";
+  if (event.kind === "turn.end") {
+    const completedObservedTurn = active.has(state.status) || state.completionScope === "turn";
+    if ((event.status === undefined || event.status === "idle") && completedObservedTurn) status = "complete";
+    else if (event.status === undefined) status = "idle";
+  }
+  if (event.kind === "session.end") status = "complete";
   if (event.kind === "complete") status = "complete";
   if (event.kind === "error" || event.exitCode && event.exitCode !== 0) status = "error";
   if (event.kind === "approval.requested") status = "approval";
@@ -26,11 +40,17 @@ export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.n
   if (event.phase !== undefined) next.phase = event.phase;
   if (status !== state.status) next.stateSince = now;
   next.status = status;
+  if (event.kind === "session.end" || event.kind === "complete") next.completionScope = "session";
+  else if (event.kind === "turn.end" && status === "complete") next.completionScope = "turn";
+  else if (event.kind === "session.start" || event.kind === "turn.start" || active.has(status) || status === "error") next.completionScope = "none";
   if (status === "error") next.phase = "failed";
+  else if (event.kind === "turn.end" && status === "complete") next.phase = "completing";
   else if (status === "complete" && event.phase === undefined) next.phase = "completing";
   // A protocol producer may omit explicit session boundaries; the first active status still starts a useful timer.
   if (active.has(status)) { next.startedAt ??= now; next.endedAt = null; }
-  next.label = event.label?.toUpperCase() || (status === "editing" && event.files?.length ? `EDITING ${event.files.length} FILES` : labels[status]);
+  next.label = event.kind === "turn.end" && status === "complete"
+    ? "DONE"
+    : event.label?.toUpperCase() || (status === "editing" && event.files?.length ? `EDITING ${event.files.length} FILES` : labels[status]);
   next.detail = event.detail || event.command || (event.files?.length ? event.files.join("\n") : event.label || state.detail);
   next.attention = status === "waiting" || status === "approval" || status === "error";
   next.error = status === "error" ? (event.detail || event.label || "An agent process exited unexpectedly") : null;

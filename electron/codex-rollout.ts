@@ -18,6 +18,22 @@ function parseJson(value: string): JsonObject {
   }
 }
 
+export function splitCompleteJsonLines(value: string) {
+  const lines = value.split("\n");
+  const trailing = lines.pop() ?? "";
+  if (!trailing.trim()) return { lines, remainder: "" };
+  try {
+    JSON.parse(trailing);
+    // Codex can leave the newest JSONL record at EOF without a final newline.
+    // A syntactically complete object is already an event and must not wait for
+    // another write, especially when that event is task_complete.
+    lines.push(trailing);
+    return { lines, remainder: "" };
+  } catch {
+    return { lines, remainder: trailing };
+  }
+}
+
 function itemTextContent(value: unknown) {
   if (!Array.isArray(value)) return "";
   return value.map(object).map((part) => text(part.text)).filter(Boolean).join("\n");
@@ -59,13 +75,18 @@ function nestedToolName(source: string, fallback: string) {
 export function normalizeCodexToolCall(value: unknown) {
   const call = object(value);
   const source = text(call.input);
+  // A completed custom-tool-call is already terminal even when Codex has not
+  // yet emitted its separate output record. Treating it as in progress makes
+  // a finished command permanently look live in the fallback feed.
+  const status = text(call.status, "inProgress");
+  const cwd = filePath(decodedString(source, "workdir"));
   const tool = nestedToolName(source, text(call.name, "tool"));
   if (tool === "exec_command") {
-    return { itemType: "commandExecution", item: { command: decodedString(source, "cmd") || "Running command", status: "inProgress" } };
+    return { itemType: "commandExecution", item: { command: decodedString(source, "cmd") || "Running command", status, cwd } };
   }
   if (tool === "apply_patch") {
     const paths = [...source.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((match) => match[1].trim());
-    return { itemType: "fileChange", item: { changes: paths.map((path) => ({ path })), status: "inProgress" } };
+    return { itemType: "fileChange", item: { changes: paths.map((path) => ({ path })), status } };
   }
   if (tool === "view_image") {
     return { itemType: "imageView", item: { path: filePath(decodedString(source, "path")) } };
@@ -73,7 +94,7 @@ export function normalizeCodexToolCall(value: unknown) {
   if (tool === "web__run") {
     return { itemType: "webSearch", item: { query: "Searching official sources" } };
   }
-  return { itemType: "dynamicToolCall", item: { tool, arguments: {}, status: "inProgress" } };
+  return { itemType: "dynamicToolCall", item: { tool, arguments: {}, status } };
 }
 
 export function normalizeCodexRolloutItem(value: unknown) {
@@ -82,7 +103,7 @@ export function normalizeCodexRolloutItem(value: unknown) {
   const itemType = rawType ? `${rawType[0].toLowerCase()}${rawType.slice(1)}` : "";
   if (itemType === "reasoning") return { itemType, item: { summary: item.summary_text ?? item.summary ?? [] } };
   if (itemType === "agentMessage") return { itemType, item: { text: text(item.text) || itemTextContent(item.content) } };
-  if (itemType === "commandExecution") return { itemType, item: { command: commandText(item.command), status: text(item.status) } };
+  if (itemType === "commandExecution") return { itemType, item: { command: commandText(item.command), status: text(item.status), cwd: filePath(item.cwd) } };
   if (itemType === "fileChange") return { itemType, item: { changes: item.changes ?? [], status: item.status } };
   if (itemType === "mcpToolCall" || itemType === "dynamicToolCall") {
     return { itemType, item: {

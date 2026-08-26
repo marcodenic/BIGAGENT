@@ -56,6 +56,8 @@ header:active { cursor: grabbing; }
 header button { opacity: 0; transition: opacity .18s, color .18s; }
 .app:hover header button { opacity: 1; }
 header button:hover { color: #efeee9; }
+header button.is-active { opacity: 1; color: var(--active); }
+header button.agents-toggle { opacity: 1; }
 .fullscreen-toggle { font-size: 1.35em; line-height: 1; letter-spacing: 0; }
 
 .workstream-board {
@@ -561,6 +563,21 @@ header button:hover { color: #efeee9; }
   width: clamp(82px, 14vw, 150px);
 }
 
+/* A lone agent does not need the portrait layout's narrow face rail. Let the
+   activity use the full top section and turn the empty lower half into a
+   centered character stage. */
+.layout-portrait.board-count-1 .workstream.single-agent .workstream-activity {
+  padding-left: 0;
+  padding-right: 0;
+}
+.layout-portrait.board-count-1 .workstream.single-agent .matrix-face {
+  left: 50%;
+  right: auto;
+  top: 72%;
+  width: min(70vw, 50vh, 680px);
+  transform: translate(-50%, -50%);
+}
+
 /* Dense portrait boards need their own hierarchy. Preserve the tile's left
    identity/face rail and keep the clock above, not beside, the activity. */
 .layout-portrait.agent-tile-board.board-count-6 .workstream-board {
@@ -672,8 +689,11 @@ header button:hover { color: #efeee9; }
 .completion-hero small { font: 400 clamp(9px, .7vw, 12px) "Geist Mono Variable", monospace; letter-spacing: .16em; color: #777a70; }
 .completion-hero h1 { margin: clamp(10px, 1.5vh, 20px) 0; font-size: clamp(62px, 8.5vw, 154px); font-weight: 500; line-height: .78; letter-spacing: -.08em; color: var(--complete); }
 .completion-hero p { margin: 0; font: 300 clamp(10px, .82vw, 14px) "Geist Mono Variable", monospace; letter-spacing: .05em; color: #92958b; }
-.completion-face { width: min(270px, 72%); margin-top: auto; padding-top: 24px; }
-.completion-face .matrix-face, .empty-face .matrix-face { position: static; display: block; width: 100%; transform: none; opacity: .9; }
+.completion-face {
+  width: min(270px, 72%);
+  margin: clamp(28px, 4vh, 52px) auto 0;
+}
+.completion-face .matrix-face, .empty-face .matrix-face { position: static; left: auto; top: auto; display: block; width: 100%; transform: none; opacity: .9; }
 .completion-face .official-grok-face, .empty-face .official-grok-face { position: relative; }
 .completion-summary ol { list-style: none; min-width: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(18px, 2.4vw, 38px); }
 .completion-summary li { min-width: 0; padding: clamp(15px, 2vh, 28px) 0; border-top: 1px solid #34372f; }
@@ -689,9 +709,74 @@ header button:hover { color: #efeee9; }
 
 .empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .idle-dot { width: 11px; height: 11px; margin-bottom: clamp(24px, 4vh, 54px); background: #74786f; box-shadow: 0 0 0 4px #ffffff08; }
+.idle-dot.is-live { background: var(--active); box-shadow: 0 0 18px #c8e9438c, 0 0 0 4px #c8e94312; }
 .empty-state h1 { margin: 0; font-size: clamp(86px, 16vw, 260px); font-weight: 500; line-height: .8; letter-spacing: -.085em; }
 .empty-state p { margin: clamp(24px, 4vh, 50px) 0 0; font: 300 clamp(13px, 1.4vw, 22px) "Geist Mono Variable", monospace; color: #8b8e84; }
 .empty-face { width: clamp(150px, 18vw, 270px); margin-top: clamp(35px, 6vh, 80px); }
+.provider-ready-state { min-height: 0; overflow: auto; padding: clamp(20px, 4vh, 54px) 0; }
+.provider-ready-state .idle-dot { margin-bottom: clamp(16px, 2.5vh, 32px); }
+.provider-ready-state h1 { font-size: clamp(64px, 10vw, 168px); }
+.provider-ready-state > p { margin-top: clamp(16px, 2.4vh, 30px); }
+.provider-intro { color: #868a80 !important; }
+.provider-readiness {
+  width: min(1080px, 88vw);
+  margin-top: clamp(28px, 5vh, 58px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(14px, 1.8vw, 28px);
+  text-align: left;
+}
+.provider-health {
+  min-width: 0;
+  padding: clamp(16px, 2vw, 26px);
+  border: 1px solid #30332c;
+  background: #0c0e0b;
+}
+.provider-health-heading { display: flex; align-items: center; gap: 13px; }
+.provider-health-heading > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.provider-health-heading b { font: 500 clamp(12px, .9vw, 15px) "Geist Mono Variable", monospace; letter-spacing: .08em; }
+.provider-health-heading small { color: #74776e; font: 400 clamp(8px, .63vw, 10px) "Geist Mono Variable", monospace; letter-spacing: .1em; }
+.provider-status-chip {
+  min-height: 24px;
+  margin-left: auto;
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  border: 1px solid #3a3d35;
+  color: #979a91;
+  font: 500 clamp(7px, .55vw, 9px) "Geist Mono Variable", monospace;
+  letter-spacing: .09em;
+  white-space: nowrap;
+}
+.provider-status-chip > i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; }
+.provider-health.state-connecting .provider-status-chip > i { animation: urgent 1.5s ease-in-out infinite; }
+.provider-status-chip.tone-ready { border-color: #527652; color: var(--active); background: #c8e94308; }
+.provider-status-chip.tone-attention { border-color: #735b29; color: var(--attention); background: #ffb51d08; }
+.provider-status-chip.tone-error { border-color: #743f39; color: var(--error); background: #ff625708; }
+.provider-health-logo { width: 28px; height: 28px; display: grid; place-items: center; flex: none; color: #efeee9; }
+.provider-health-logo.provider-claude { color: #d97757; }
+.provider-health-logo svg { width: 100%; height: 100%; fill: currentColor; }
+.provider-health > p { min-height: 2.7em; margin: 16px 0 0; color: #9a9d93; font: 400 clamp(9px, .72vw, 12px)/1.4 "Geist Mono Variable", monospace; }
+.provider-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+.provider-actions button { padding: 7px 10px; border: 1px solid #3b3e36; color: #b8bbb0; font: 500 clamp(8px, .62vw, 10px) "Geist Mono Variable", monospace; letter-spacing: .08em; }
+.provider-actions button:hover { border-color: var(--active); color: #efeee9; }
+.provider-actions button:disabled { opacity: .45; cursor: wait; }
+.provider-discovery-result { display: flex; flex-direction: column; align-items: center; margin-top: clamp(18px, 2.8vh, 32px); }
+.provider-ready-face { width: clamp(88px, 9vw, 138px); margin: 0; }
+.provider-discovery-result > p { max-width: 58ch; margin: clamp(12px, 1.8vh, 20px) 0 0; color: #a2a59b; font-size: clamp(10px, .82vw, 14px); }
+.provider-discovery-result.has-agents > p { color: var(--active); }
+.provider-discovery-result.has-no-agents > p { color: #b8908c; }
+.provider-continue {
+  margin-top: clamp(15px, 2.3vh, 26px);
+  padding: 10px 15px;
+  border: 1px solid #494c43;
+  color: #c8cac1;
+  font: 500 clamp(8px, .65vw, 11px) "Geist Mono Variable", monospace;
+  letter-spacing: .1em;
+}
+.provider-continue:hover { border-color: var(--active); color: #efeee9; }
 
 footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; border-top: 1px solid #292b27; }
 .sync-error { color: var(--error); }
@@ -739,6 +824,10 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 @media (max-width: 620px) {
   .app { padding: clamp(10px, 3.5vw, 20px); }
   .summary { display: none; }
+  .provider-readiness { width: 100%; grid-template-columns: 1fr; }
+  .provider-ready-state h1 { font-size: clamp(50px, 15vw, 92px); }
+  .provider-status-chip { margin-left: auto; }
+  .provider-ready-face .matrix-face, .operational-ready .matrix-face { display: block; }
   .workstream { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); gap: 8px 14px; }
   .workstream-identity { grid-column: 1; grid-row: 1; }
   .workstream-visual { grid-column: 2; grid-row: 1; align-self: center; min-width: 0; }

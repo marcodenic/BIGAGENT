@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { StringDecoder } from "node:string_decoder";
-import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem } from "./codex-rollout";
+import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem, splitCompleteJsonLines } from "./codex-rollout";
 
 type JsonObject = Record<string, unknown>;
 type ThreadDisplayMeta = {
@@ -46,6 +46,7 @@ type StateThreadRow = {
 };
 
 type AgentLoopExitRow = { thread_id: string; exited_at: number };
+type CompletedTurnRow = { thread_id: string; ts: number; feedback_log_body: string };
 
 const liveRollouts = new Map<string, LiveRolloutState>();
 const INITIAL_ROLLOUT_TAIL_BYTES = 8 * 1024 * 1024;
@@ -178,8 +179,9 @@ function updateLiveRollout(path: string) {
     source = source.slice(firstBreak + 1);
     state.discardInitialLine = false;
   }
-  const lines = source.split("\n");
-  state.remainder = lines.pop() || "";
+  const framed = splitCompleteJsonLines(source);
+  const lines = framed.lines;
+  state.remainder = framed.remainder;
 
   for (const line of lines) {
     const entry = parseJson(line);
@@ -190,7 +192,8 @@ function updateLiveRollout(path: string) {
       const callId = text(payload.call_id, text(payload.callId));
       if (responseType === "custom_tool_call" && callId) {
         state.items = state.items.filter((item) => item.callId !== callId);
-        pushLiveItem(state, normalizeCodexToolCall(payload), timestamp, callId, true);
+        const normalized = normalizeCodexToolCall(payload);
+        pushLiveItem(state, normalized, timestamp, callId, text(normalized.item.status) !== "completed");
       } else if (responseType === "custom_tool_call_output" && callId) {
         completeLiveCall(state, callId, timestamp);
       }
@@ -252,6 +255,33 @@ function agentLoopExitTimes() {
       GROUP BY thread_id
     `);
     return new Map(rows.map((row) => [row.thread_id, row.exited_at]));
+  } finally {
+    database.close();
+  }
+}
+
+function completedTurnTimes() {
+  const database = tryOpenReadOnly(logsDatabasePath());
+  if (!database) return new Map<string, number>();
+  try {
+    const rows = queryAll<CompletedTurnRow>(database, `
+      SELECT thread_id, ts, feedback_log_body
+      FROM logs
+      WHERE thread_id IS NOT NULL
+        AND target = 'codex_core::session::turn'
+        AND feedback_log_body LIKE '%post sampling token usage%'
+        AND feedback_log_body LIKE '%needs_follow_up=false%'
+      ORDER BY ts DESC
+      LIMIT 1000
+    `);
+    const completed = new Map<string, number>();
+    for (const row of rows) {
+      const turnId = row.feedback_log_body.match(/\bturn_id=([0-9a-f-]+)/)?.[1];
+      if (!turnId) continue;
+      const key = `${row.thread_id}:${turnId}`;
+      if (!completed.has(key)) completed.set(key, row.ts);
+    }
+    return completed;
   } finally {
     database.close();
   }
@@ -369,6 +399,16 @@ function threadDisplayMeta(
 
 function liveRecordHasContent(record: LiveRolloutItem) {
   const item = parseJson(record.item_json);
+  // BIG AGENT must never represent its own Electron dev/preview launcher as
+  // an observed coding agent. Those commands intentionally stay alive and
+  // otherwise become a permanent false workstream.
+  const command = text(item.command);
+  const cwd = text(item.cwd).replace(/\/$/, "");
+  if (record.item_type === "commandExecution"
+    && cwd.endsWith("/BIGAGENT")
+    && /\bpnpm\s+(?:dev|start|preview)\b|electron-vite|node_modules\/electron|electron\/dist\/electron/.test(command)) {
+    return false;
+  }
   if (record.item_type === "reasoning") return Array.isArray(item.summary) && item.summary.some((value) => text(value).trim());
   if (record.item_type === "agentMessage") return Boolean(text(item.text).trim());
   if (record.item_type === "userMessage" || record.item_type === "contextCompaction") return false;
@@ -444,6 +484,9 @@ function recordEvent(
     const testing = ["test", "vitest", "jest", "pytest", "cargo test", "go test"].some((word) => value.includes(word));
     const building = [" build", "compile", "pnpm build", "cargo build"].some((word) => value.includes(word));
     const finished = item.status === "completed";
+    // Keep the result visible while the turn continues; the authoritative
+    // needs_follow_up=false lifecycle record closes the turn after its final
+    // response instead of guessing from this individual command.
     status = finished ? "working" : testing ? "testing" : "command";
     phase = finished ? "receiving" : testing ? "testing" : "executing";
     label = finished ? "RESULT RECEIVED" : testing ? "RUNNING TESTS" : building ? "BUILDING" : "RUNNING";
@@ -596,16 +639,19 @@ export function codexDesktopSessions() {
   if (!existsSync(stateDatabasePath())) return [];
   const stateDatabase = openReadOnly(stateDatabasePath());
   try {
+    const recentCutoffMs = Date.now() - 10 * 60_000;
     const loopExitTimes = agentLoopExitTimes();
+    const turnCompletionTimes = completedTurnTimes();
     const names = threadNames();
     const rolloutThreads = queryAll<StateThreadRow>(stateDatabase, `
       SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
         reasoning_effort, agent_nickname, agent_role
       FROM threads
       WHERE archived = 0 AND rollout_path IS NOT NULL AND rollout_path != ''
+        AND updated_at_ms >= ?
       ORDER BY updated_at_ms DESC
       LIMIT 24
-    `);
+    `, recentCutoffMs);
     const events: JsonObject[] = [];
     for (const thread of rolloutThreads) {
       const live = updateLiveRollout(thread.rollout_path);
@@ -614,7 +660,10 @@ export function codexDesktopSessions() {
         live.status,
         live.startedAt,
         live.completedAt,
-        loopExitTimes.get(thread.id),
+        Math.max(
+          loopExitTimes.get(thread.id) ?? 0,
+          turnCompletionTimes.get(`${thread.id}:${live.turnId}`) ?? 0,
+        ) || undefined,
       );
       const display = threadDisplayMeta(stateDatabase, names, thread);
       const records = selectedLiveRecords(live);

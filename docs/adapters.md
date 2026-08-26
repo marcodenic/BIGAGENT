@@ -10,6 +10,20 @@ Prefer these integration lanes, in order:
 
 The telemetry hub keeps the original source, product, transport and provider event name in `meta`, then translates observable activity into `AgentEvent`. It does not retain prompt bodies or private reasoning.
 
+## Built-in providers
+
+### Codex
+
+BIG AGENT connects as a read-only client to the official local Codex App Server daemon over its Unix WebSocket. It initializes the protocol, polls `thread/loaded/list`, subscribes with `thread/resume`, and consumes thread, turn, item, reasoning-summary, message, approval, and input notifications. It observes server requests but never answers them.
+
+Codex Desktop must use the same daemon for passive monitoring. On Linux BIG AGENT writes a per-user desktop entry with `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`; the ready screen identifies an already-running private instance and offers a one-time restart. The rollout/database reader is disabled unless `BIG_AGENT_CODEX_FALLBACK=1` is explicitly set. Historical BIG AGENT Codex command hooks are removed only after an App Server connection succeeds, while unrelated hooks are preserved.
+
+### Claude Code
+
+BIG AGENT installs official HTTP observation hooks for session, prompt, message, tool, permission, subagent, task, stop, and compaction events. It preserves existing Claude settings and hook actions. The localhost receiver always returns an empty `204`, the documented neutral result, so BIG AGENT cannot affect Claude's behavior. `claude agents --json` supplies an authoritative active-session registry; `--all` is consulted to classify agents that leave the active list.
+
+Adapters must keep session, turn, tool, and child-agent boundaries distinct. In particular, a turn-level stop or idle notification is not a session completion. See the [lifecycle contract](lifecycle.md).
+
 ## Local endpoints
 
 | Endpoint | Input |
@@ -19,7 +33,7 @@ The telemetry hub keeps the original source, product, transport and provider eve
 | `POST /v1/traces` | OTLP/JSON traces |
 | `POST /v1/logs` | OTLP/JSON logs |
 | `POST /v1/metrics` | OTLP/JSON metrics/source health |
-| `POST /sources/codex-app-server` | Codex App Server JSON-RPC |
+| `POST /sources/codex-app-server` | Codex App Server JSON-RPC from an external proxy/adapter |
 | `POST /sources/codex-json` | Codex `exec --json` |
 | `POST /sources/acp` | ACP JSON-RPC |
 | `GET /health` | Source connection and event counters |

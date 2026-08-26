@@ -30,7 +30,12 @@ function planSteps(...values: unknown[]) {
   const steps = values.flatMap(array).map((value) => {
     if (typeof value === "string") return value.trim();
     const item = object(value);
-    return text(item.content, item.step, item.title, item.description, item.text, item.label) ?? "";
+    const content = text(item.content, item.step, item.title, item.description, item.text, item.label) ?? "";
+    const status = key(item.status);
+    if (!content) return "";
+    if (/complete|done/.test(status)) return `[x] ${content}`;
+    if (/progress|active|working/.test(status)) return `[~] ${content}`;
+    return content;
   }).filter(Boolean);
   return steps.length ? [...new Set(steps)].slice(0, 6) : undefined;
 }
@@ -94,6 +99,7 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     transport: envelope.transport,
     direction: envelope.direction,
     sessionId,
+    parentSessionId: firstNestedText(payload, ["parent_session_id", "parentSessionId", "parent_thread_id", "parentThreadId"]),
     threadId: text(thread.id, payload.thread_id, payload.threadId),
     turnId: text(payload.turn_id, payload.turnId, extra.turnId),
     workstreamId,
@@ -102,6 +108,7 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     agentName: text(agent.name, payload.agent_name, payload.agentName, extra.agentName, envelope.product),
     modelProvider: text(model.provider, payload.model_provider, payload.modelProvider, extra.modelProvider, envelope.product),
     model: text(model.id, model.name, payload.model_id, payload.modelId, payload.model, extra.model),
+    effort: text(payload.reasoning_effort, payload.reasoningEffort, extra.effort),
     ...extra,
   };
 }
@@ -166,24 +173,95 @@ function protocolEvents(envelope: TelemetryEnvelope): AgentEvent[] {
 
 function hookEvents(envelope: TelemetryEnvelope) {
   const payload = object(envelope.payload);
+  const toolInput = object(payload.tool_input ?? payload.toolInput);
   const rawName = text(payload.hook_event_name, payload.hookEventName, payload.event_name, payload.eventName, payload.event, payload.type, payload.name) ?? "hook";
   const eventName = key(rawName);
   const toolName = text(payload.tool_name, payload.toolName, nested(payload, "tool").name);
-  const identity = text(payload.event_id, payload.eventId, payload.id) ?? `${rawName}|${text(payload.session_id, payload.sessionId)}|${text(payload.timestamp)}|${toolName}`;
+  const command = text(payload.command, toolInput.command);
+  const description = text(payload.description, toolInput.description);
+  const parentSessionId = text(payload.session_id, payload.sessionId);
+  const agentId = text(payload.agent_id, payload.agentId);
+  const agentType = text(payload.agent_type, payload.agentType);
+  const messageId = text(payload.message_id, payload.messageId);
+  const messageIndex = numberValue(payload.index);
+  const hookCanRepeatWithoutId = /sessionstart|sessionend|permissionrequest|precompact|postcompact|stop|subagentstop/.test(eventName);
+  const identity = text(payload.event_id, payload.eventId, payload.id) ?? [
+    rawName,
+    text(payload.session_id, payload.sessionId),
+    text(payload.turn_id, payload.turnId),
+    agentId,
+    messageId,
+    messageIndex,
+    text(payload.tool_use_id, payload.toolUseId),
+    text(payload.timestamp),
+    toolName,
+    text(payload.source, payload.reason),
+    text(payload.trigger),
+    String(payload.stop_hook_active ?? payload.stopHookActive ?? ""),
+    stableToken(JSON.stringify(toolInput)),
+    hookCanRepeatWithoutId ? envelope.receivedAt : "",
+  ].join("|");
   const common = { identity, meta: { rawEventName: rawName } };
+  const subagentMeta = {
+    rawEventName: rawName,
+    sessionId: agentId,
+    threadId: parentSessionId,
+    workstreamId: parentSessionId,
+    agentName: agentType ?? `${envelope.product === "claude" ? "Claude" : "Codex"} subagent`,
+    parentSessionId,
+    lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage),
+  };
   if (/permission|approval/.test(eventName)) return [makeEvent(envelope, payload, "approval", "approval.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Permission required", tool: toolName })];
   if (/question|inputrequested|userinput/.test(eventName)) return [makeEvent(envelope, payload, "waiting", "input.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Input required" })];
   if (/error|failure|failed/.test(eventName)) return [makeEvent(envelope, payload, "error", "error", { ...common, phase: "failed", detail: text(payload.error, payload.message, nested(payload, "error").message) || "Agent reported an error" })];
-  if (/subagentstart|subagentcreated|taskcreated/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: "Starting another agent" })];
-  if (/subagentstop|subagentend|taskcompleted/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: "Subagent result received" })];
-  if (/sessionstart|taskstart|turnstart|beforeagent/.test(eventName)) return [makeEvent(envelope, payload, "thinking", eventName.includes("session") || eventName.includes("task") ? "session.start" : "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "Agent started" })];
-  if (/sessionend|taskcomplete|taskend|turnend|afteragent|stop$/.test(eventName)) return [makeEvent(envelope, payload, "complete", "complete", { ...common, phase: "completing", detail: "Agent completed" })];
-  if (/pretool|beforetool|toolstart|beforecommand|precommand/.test(eventName)) {
-    const activity = toolActivity(toolName, text(payload.command, payload.description));
-    return [makeEvent(envelope, payload, activity.status, "command.start", { ...common, ...activity, command: text(payload.command) })];
+  if (/subagentstart|subagentcreated/.test(eventName) && agentId) return [makeEvent(envelope, payload, "thinking", "session.start", { identity, meta: subagentMeta, phase: "starting", label: "STARTING", detail: agentType ? `${agentType} started` : "Subagent started" })];
+  if (/subagentstop|subagentend/.test(eventName) && agentId) return [makeEvent(envelope, payload, "complete", "session.end", { identity, meta: { ...subagentMeta, stopHookActive: payload.stop_hook_active ?? payload.stopHookActive }, phase: "completing", label: "DONE", detail: agentType ? `${agentType} completed` : "Subagent completed" })];
+  if (/subagentstart|subagentcreated/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: "Starting another agent" })];
+  if (/subagentstop|subagentend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: "Subagent result received" })];
+  if (/userpromptsubmit/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "New request received" })];
+  if (/messagedisplay/.test(eventName)) {
+    const delta = text(payload.delta);
+    return [makeEvent(envelope, payload, "working", "activity", {
+      ...common,
+      phase: "responding",
+      label: "RESPONDING",
+      detail: delta || "Writing a response",
+      meta: {
+        rawEventName: rawName,
+        activityClass: "narrative",
+        narrativeKind: "message",
+        messageId,
+        messageIndex,
+        messageFinal: payload.final === true,
+      },
+    })];
   }
-  if (/posttool|aftertool|toolend|toolcomplete|aftercommand|postcommand/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: toolName ? `${toolName} finished` : "Tool result received", tool: toolName })];
-  if (/beforemodel|premodel|userprompt|promptsubmit|promptsubmitted/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "planning", detail: "Planning the next step" })];
+  if (/sessionstart/.test(eventName)) {
+    const startSource = key(payload.source);
+    if (startSource === "compact") return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "retrying", label: "LOADING", detail: "Compacting context" })];
+    return [makeEvent(envelope, payload, "idle", "session.start", { ...common, phase: "idle", label: "READY", detail: startSource ? `Session ${startSource}` : "Session available" })];
+  }
+  if (/taskcreated|taskstart/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: text(payload.subject, payload.description) || "Task created" })];
+  if (/taskcompleted|taskcomplete|taskend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: text(payload.subject, payload.description) || "Task completed" })];
+  if (/turnstart|beforeagent/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "Agent started" })];
+  if (/sessionend/.test(eventName)) return [makeEvent(envelope, payload, "complete", "session.end", { ...common, phase: "completing", detail: "Agent session completed", meta: { rawEventName: rawName, lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage) } })];
+  if (/turnend|afteragent|stop$/.test(eventName)) {
+    const backgroundWork = [...array(payload.background_tasks), ...array(payload.backgroundTasks), ...array(payload.session_crons), ...array(payload.sessionCrons)];
+    if (backgroundWork.length) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "WORKING", detail: "Background work continues" })];
+    return [makeEvent(envelope, payload, "idle", "turn.end", {
+      ...common,
+      phase: "idle",
+      label: "READY",
+      detail: "Turn finished",
+      meta: { rawEventName: rawName, lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage) },
+    })];
+  }
+  if (/pretool|beforetool|toolstart|beforecommand|precommand/.test(eventName)) {
+    const activity = toolActivity(toolName, command ?? description);
+    return [makeEvent(envelope, payload, activity.status, "command.start", { ...common, ...activity, command })];
+  }
+  if (/posttool|aftertool|toolend|toolcomplete|aftercommand|postcommand/.test(eventName)) return [makeEvent(envelope, payload, "working", "command.end", { ...common, phase: "receiving", label: "RECEIVING", detail: command ?? (toolName ? `${toolName} finished` : "Tool result received"), command, tool: toolName })];
+  if (/beforemodel|premodel|userprompt|promptsubmit|promptsubmitted/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "planning", detail: "Planning the next step" })];
   if (/aftermodel|postmodel|response|thought/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail: "Writing a response" })];
   if (/upload/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "uploading", label: "UPLOADING", detail: "Uploading a result" })];
   if (/compact|retry|backoff/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "retrying", label: "LOADING", detail: "Preparing more context" })];
@@ -234,7 +312,9 @@ function otlpActivity(name: string, values: Json, ended: boolean) {
   if (/notification|notify/.test(operation)) return { status: "working" as const, kind: "activity" as const, phase: "notifying" as const, detail: "Agent notification", tool: toolName };
   if (/retry|backoff|compact/.test(operation)) return { status: "thinking" as const, kind: "activity" as const, phase: "retrying" as const, detail: "Preparing more context", tool: toolName };
   if (/sessionstart|agentstart|invokeagent|turnstart/.test(operation)) return { status: "thinking" as const, kind: "turn.start" as const, phase: "starting" as const, detail: "Agent started", tool: toolName };
-  if (/complete|sessionend|turnend|stop/.test(operation)) return { status: "complete" as const, kind: "complete" as const, phase: "completing" as const, detail: "Agent completed", tool: toolName };
+  if (/sessionend|agentend/.test(operation)) return { status: "complete" as const, kind: "session.end" as const, phase: "completing" as const, detail: "Agent session completed", tool: toolName };
+  if (/turnend|stop/.test(operation)) return { status: "idle" as const, kind: "turn.end" as const, phase: "idle" as const, detail: "Agent turn finished", tool: toolName };
+  if (/complete/.test(operation)) return { status: "working" as const, kind: "activity" as const, phase: "receiving" as const, detail: "Operation completed", tool: toolName };
   return { status: "thinking" as const, kind: "activity" as const, phase: "planning" as const, detail: "Agent is working", tool: toolName };
 }
 
@@ -308,17 +388,19 @@ function opencodeEvents(envelope: TelemetryEnvelope) {
   const partState = object(part.state);
   const sessionId = text(payload.sessionID, payload.sessionId, info.sessionID, info.sessionId, part.sessionID, part.sessionId, info.id);
   const basePayload = { ...payload, sessionId, projectName: text(payload.directory, info.directory) };
-  const common = { identity: text(root.id) ?? `${rawName}|${sessionId}|${text(info.id, part.id)}|${text(root.timestamp)}`, meta: { rawEventName: rawName } };
+  const openCodeNaturalId = text(root.id, root.timestamp, part.id);
+  const common = { identity: openCodeNaturalId ?? `${rawName}|${sessionId}|${text(info.id)}|${stableToken(JSON.stringify({ status: payload.status, partState: part.state, plan: payload.plan }))}|${envelope.receivedAt}`, meta: { rawEventName: rawName } };
   if (eventName === "serverconnected") return [];
   if (/permissionasked|permissionupdated/.test(eventName)) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", detail: "Permission required" })];
   if (/questionasked/.test(eventName)) return [makeEvent(envelope, basePayload, "waiting", "input.requested", { ...common, phase: "waiting", detail: "Input required" })];
   if (/sessionerror/.test(eventName)) return [makeEvent(envelope, basePayload, "error", "error", { ...common, phase: "failed", detail: text(payload.error, nested(payload, "error").message) || "OpenCode reported an error" })];
-  if (/sessioncreated/.test(eventName)) return [makeEvent(envelope, basePayload, "thinking", "session.start", { ...common, phase: "starting", detail: "OpenCode session started" })];
-  if (/sessionidle|sessiondeleted/.test(eventName)) return [makeEvent(envelope, basePayload, "complete", "complete", { ...common, phase: "completing", detail: "OpenCode completed" })];
+  if (/sessioncreated/.test(eventName)) return [makeEvent(envelope, basePayload, "idle", "session.start", { ...common, phase: "idle", label: "READY", detail: "OpenCode session available" })];
+  if (/sessiondeleted/.test(eventName)) return [makeEvent(envelope, basePayload, "complete", "session.end", { ...common, phase: "completing", detail: "OpenCode session ended" })];
+  if (/sessionidle/.test(eventName)) return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: "OpenCode is idle" })];
   if (/sessionstatus/.test(eventName)) {
     const status = key(object(payload.status).type || payload.status);
     if (/retry/.test(status)) return [makeEvent(envelope, basePayload, "thinking", "activity", { ...common, phase: "retrying", label: "RETRYING", detail: text(object(payload.status).message) || "OpenCode is retrying" })];
-    if (/idle/.test(status)) return [makeEvent(envelope, basePayload, "complete", "complete", { ...common, phase: "completing", detail: "OpenCode completed" })];
+    if (/idle/.test(status)) return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: "OpenCode is idle" })];
     return [makeEvent(envelope, basePayload, "thinking", "activity", { ...common, phase: "planning", detail: "OpenCode is working" })];
   }
   if (/sessiondiff/.test(eventName)) return [makeEvent(envelope, basePayload, "editing", "files.changed", { ...common, phase: "editing", detail: "Updating files" })];
@@ -350,8 +432,9 @@ function acpEvents(envelope: TelemetryEnvelope) {
   const update = object(params.update);
   const updateType = key(update.sessionUpdate || update.type);
   const basePayload = { ...params, sessionId: text(params.sessionId, params.session_id) };
-  const common = { identity: `${text(payload.id) ?? "notification"}|${method}|${updateType}|${text(update.toolCallId, update.id)}|${text(update.status)}|${text(update.timestamp)}`, meta: { rawEventName: method || updateType } };
-  if (method === "session/new") return [makeEvent(envelope, basePayload, "thinking", "session.start", { ...common, phase: "starting", detail: "ACP agent session started" })];
+  const acpNaturalId = text(payload.id, update.toolCallId, update.id, update.timestamp);
+  const common = { identity: `${acpNaturalId ?? `notification-${envelope.receivedAt}`}|${method}|${updateType}|${text(update.status)}|${stableToken(JSON.stringify({ plan: update.plan, steps: update.steps }))}`, meta: { rawEventName: method || updateType } };
+  if (method === "session/new") return [makeEvent(envelope, basePayload, "idle", "session.start", { ...common, phase: "idle", label: "READY", detail: "ACP agent session available" })];
   if (method === "session/prompt") return [makeEvent(envelope, basePayload, "thinking", "turn.start", { ...common, phase: "planning", detail: "Agent is planning" })];
   if (/requestpermission/.test(key(method))) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", detail: "Permission required" })];
   if (method !== "session/update") return [];
@@ -379,23 +462,61 @@ function codexEvents(envelope: TelemetryEnvelope) {
   const itemType = key(item.type);
   const thread = object(params.thread || result.thread);
   const turn = object(params.turn || result.turn);
+  const threadCwd = text(thread.cwd, params.cwd);
   const basePayload = {
     ...params,
     sessionId: text(params.threadId, params.thread_id, thread.id, root.thread_id),
     threadId: text(params.threadId, params.thread_id, thread.id, root.thread_id),
     turnId: text(params.turnId, params.turn_id, turn.id, root.turn_id),
-    projectName: text(params.cwd, thread.cwd),
+    parentSessionId: text(thread.parentThreadId),
+    workstreamId: text(thread.sessionId, thread.parentThreadId, params.threadId, params.thread_id, thread.id, root.thread_id),
+    projectName: text(thread.name, threadCwd?.split(/[\\/]/).filter(Boolean).pop()),
+    cwd: threadCwd,
+    agentName: text(thread.agentNickname, thread.agentRole),
+    modelProvider: text(thread.modelProvider),
+    model: text(thread.model, result.model),
+    reasoningEffort: text(thread.reasoningEffort, result.reasoningEffort),
+    timestamp: root.emittedAtMs,
   };
-  const common = { identity: `${text(root.id) ?? "notification"}|${rawType}|${text(item.id)}|${text(params.timestamp)}`, meta: { rawEventName: rawType } };
-  if (/threadstarted|threadstart/.test(eventType)) return [makeEvent(envelope, basePayload, "thinking", "session.start", { ...common, phase: "starting", detail: "Codex session started" })];
+  const threadId = text(basePayload.threadId);
+  const turnId = text(basePayload.turnId);
+  const codexOccurrence = root.emittedAtMs ?? params.timestamp ?? (/threadstarted|threadstatuschanged|threadclosed|threadarchived|threaddeleted/.test(eventType) ? envelope.receivedAt : "");
+  const common = {
+    identity: `${text(root.id) ?? "notification"}|${rawType}|${threadId}|${turnId}|${text(item.id)}|${codexOccurrence}|${stableToken(JSON.stringify({ status: params.status, turnStatus: turn.status, plan: params.plan, itemStatus: item.status, delta: params.delta, text: item.text, summary: item.summary }))}`,
+    meta: { rawEventName: rawType },
+  };
+  if (/threadstarted|threadstart/.test(eventType)) return [makeEvent(envelope, basePayload, envelope.format === "codex-json" ? "thinking" : "idle", "session.start", { ...common, phase: envelope.format === "codex-json" ? "starting" : "idle", label: envelope.format === "codex-json" ? "STARTING" : "READY", detail: "Codex session started" })];
+  if (/threadclosed|threadarchived|threaddeleted/.test(eventType)) return [makeEvent(envelope, basePayload, "complete", "session.end", { ...common, phase: "completing", label: "DONE", detail: "Codex session ended" })];
+  if (/threadunarchived/.test(eventType)) return [makeEvent(envelope, basePayload, "idle", "session.start", { ...common, phase: "idle", label: "READY", detail: "Codex session available" })];
+  if (/threadstatuschanged/.test(eventType)) {
+    const runtime = object(params.status);
+    const statusType = key(runtime.type ?? params.status);
+    const activeFlags = array(runtime.activeFlags).map(key);
+    if (statusType === "systemerror") return [makeEvent(envelope, basePayload, "error", "error", { ...common, phase: "failed", detail: "Codex session encountered a system error" })];
+    if (statusType === "notloaded") return [makeEvent(envelope, basePayload, "complete", "session.end", { ...common, phase: "completing", label: "DONE", detail: "Codex session closed" })];
+    if (statusType === "idle") return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: "Codex is idle" })];
+    if (activeFlags.some((flag) => /approval|input/.test(flag))) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Codex needs approval" })];
+    if (statusType === "active") return [makeEvent(envelope, basePayload, "thinking", "activity", { ...common, phase: "planning", label: "THINKING", detail: "Codex is active" })];
+  }
+  if (/requestapproval|approvalrequest/.test(eventType)) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Codex needs approval", tool: text(item.tool, item.name, params.tool) })];
+  if (/requestuserinput|userinputrequest/.test(eventType)) return [makeEvent(envelope, basePayload, "waiting", "input.requested", { ...common, phase: "waiting", label: "NEEDS YOU", detail: "Codex needs input" })];
   if (/turnstarted|turnstart/.test(eventType)) return [makeEvent(envelope, basePayload, "thinking", "turn.start", { ...common, phase: "planning", detail: "Codex is planning" })];
   if (/turncompleted|turncomplete/.test(eventType)) {
     const status = key(turn.status || params.status);
-    return [makeEvent(envelope, basePayload, /fail|error|interrupt/.test(status) ? "error" : "complete", /fail|error|interrupt/.test(status) ? "error" : "complete", { ...common, phase: /fail|error|interrupt/.test(status) ? "failed" : "completing", detail: /fail|error|interrupt/.test(status) ? "Codex stopped with an error" : "Codex completed" })];
+    if (/fail|error/.test(status)) return [makeEvent(envelope, basePayload, "error", "error", { ...common, phase: "failed", detail: text(nested(turn, "error").message) || "Codex stopped with an error" })];
+    if (envelope.format === "codex-json") return [makeEvent(envelope, basePayload, "complete", "session.end", { ...common, phase: "completing", detail: /interrupt/.test(status) ? "Codex was interrupted" : "Codex completed" })];
+    return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: /interrupt/.test(status) ? "Codex turn interrupted" : "Codex turn completed" })];
   }
   if (/planupdated|plan/.test(eventType) || itemType === "plan") return [makeEvent(envelope, basePayload, "thinking", "plan", { ...common, phase: "planning", detail: "Updating the plan", plan: planSteps(item.plan, item.steps, item.items, params.plan, params.steps, root.plan) })];
-  if (/agentmessagedelta|agentmessage/.test(eventType) || itemType === "agentmessage") return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail: "Writing a response" })];
-  if (/reasoning/.test(eventType) || itemType === "reasoning") return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail: "Reasoning" })];
+  if (/agentmessagedelta|agentmessage/.test(eventType) || itemType === "agentmessage") {
+    const detail = text(params.delta, item.text) || "Writing a response";
+    return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "message" } })];
+  }
+  if (/reasoning/.test(eventType) || itemType === "reasoning") {
+    const summary = array(item.summary).map((part) => typeof part === "string" ? part : text(object(part).text)).filter((part): part is string => Boolean(part)).join(" ");
+    const detail = text(params.delta, summary) || "Reasoning";
+    return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "reasoning" } })];
+  }
   if (/filechange|patch/.test(eventType) || itemType === "filechange") {
     const changes = array(item.changes).map(object);
     const files = changes.map((change) => text(change.path)).filter((value): value is string => Boolean(value));

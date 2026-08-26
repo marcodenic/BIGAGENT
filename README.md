@@ -25,7 +25,7 @@ Create a distributable platform package with `pnpm package`. Electron Builder pr
 
 BIG AGENT is agent-neutral. A main-process telemetry hub accepts official structured transports, keeps source provenance, deduplicates retransmissions, and projects activity into the compact versioned BIG AGENT protocol. Agent-specific parsing never occurs in React components.
 
-When running beside Codex Desktop, the read-only local thread ledger remains available as a passive fallback. Official Codex App Server or `exec --json` events take priority for the same session. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished turns remain visible briefly, then age out automatically; amber and red states remain conspicuous without moving rows around.
+Codex Desktop is observed through its official App Server protocol. Claude Code is observed through its official HTTP hooks and `claude agents --json` registry. BIG AGENT's ready screen verifies each connection and offers setup, retry, and launch controls. Each nested agent line shows its observable activity, tool, target, and detail. No manual session switching is required. Finished agents and sessions remain visible briefly, turn-idle sessions leave the board, and failures remain conspicuous until resolved.
 
 With BIG AGENT running, send a simple event:
 
@@ -51,17 +51,21 @@ That wrapper reports running, completion, and non-zero exits. A dedicated adapte
 
 ### Codex
 
-Observe an `exec --json` run with:
+On startup BIG AGENT starts the local App Server daemon, connects read-only, and subscribes to the threads loaded by Codex Desktop. On Linux it also installs a per-user desktop launcher override so subsequent Codex launches join that shared daemon. The ready screen reports whether the feed is live and offers **OPEN CODEX** or a one-time **RESTART CODEX** when an already-running private instance must join it.
+
+The managed standalone Codex CLI is required by the shared daemon. BIG AGENT can install it from OpenAI's verified installer through **INSTALL CODEX CLI**. BIG AGENT does not answer approval or input requests received over App Server.
+
+An independently launched `exec --json` run can also be observed with:
 
 ```bash
 node scripts/big-agent.mjs codex -- codex exec "your task"
 ```
 
-Use BIG AGENT as a transparent App Server monitor when configuring a client:
+The rollout/database reader is disabled by default. `BIG_AGENT_CODEX_FALLBACK=1` enables it only as an explicit compatibility fallback.
 
-```bash
-node scripts/big-agent.mjs proxy codex-app-server -- codex app-server
-```
+### Claude Code
+
+BIG AGENT merges observation-only HTTP hooks into `~/.claude/settings.json` without replacing existing settings or hooks, then reconciles lifecycle state with `claude agents --json`. Hook responses are empty `204` responses so monitoring cannot control or block Claude. When the Claude CLI is installed, the ready screen confirms both the receiver and agent registry and offers **OPEN CLAUDE**.
 
 ### OpenTelemetry
 
@@ -73,7 +77,7 @@ otelcol --config telemetry/otel-collector.yaml
 
 Point the product at `http://127.0.0.1:4318` for OTLP/HTTP or `127.0.0.1:4317` for OTLP/gRPC. The included Collector configuration converts the standard signals to OTLP/JSON for BIG AGENT.
 
-### Hooks, OpenCode, and ACP
+### Other hooks, OpenCode, and ACP
 
 Use this command as a lifecycle hook in supported products, replacing the provider name as appropriate:
 
@@ -95,10 +99,11 @@ Inspect live source health at `http://127.0.0.1:19777/health`.
 Official feed / OTLP / hook / ACP / SSE → telemetry hub → AgentEvent → reducer → React UI
 ```
 
-The Electron main process owns source connections, normalization, the read-only Codex fallback, wake lock, image bridge, and local telemetry server. The renderer runs with Chromium sandboxing, context isolation, and no Node.js integration. The app operates locally: its server listens only on `127.0.0.1:19777`, and it has no account, cloud service, or repository upload path.
+The Electron main process owns source connections, normalization, provider readiness, wake lock, image bridge, and local telemetry server. The renderer runs with Chromium sandboxing, context isolation, and no Node.js integration. The optional read-only Codex rollout fallback is off unless explicitly enabled. The app operates locally: its server listens only on `127.0.0.1:19777`, and it has no account, cloud service, or repository upload path.
 
 - [Protocol](docs/protocol.md)
 - [Adapter guide](docs/adapters.md)
+- [Lifecycle contract](docs/lifecycle.md)
 - [Design principles](docs/design.md)
 
 ## Tests

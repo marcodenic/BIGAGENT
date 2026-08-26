@@ -21,12 +21,14 @@
     "@fontsource-variable/geist-mono": "5.3.0",
     "@lobehub/icons-static-svg": "^1.94.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "42.1.0",
     "electron-builder": "26.15.3",

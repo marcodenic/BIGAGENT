@@ -5,6 +5,7 @@ export interface AgentSession {
   id: string;
   runId: string;
   source: string;
+  parentSessionId: string;
   workstreamId: string;
   workstreamName: string;
   agentName: string;
@@ -48,6 +49,11 @@ const activeStatuses = new Set<AgentStatus>([
 ]);
 
 const genericLabels = new Set(["READY", "THINKING", "SEARCHING", "WORKING", "RUNNING", "EDITING", "RUNNING TESTS", "NEEDS YOU", "DONE", "SOMETHING BROKE"]);
+const transientHeadlineLabels = new Set(["RESULT RECEIVED", "RECEIVING"]);
+
+function headlineLabel(agent: AgentSession) {
+  return transientHeadlineLabels.has(agent.state.label) ? "WORKING" : agent.state.label;
+}
 
 function sourcePriority(source: string) {
   if (source === "codex-desktop-fallback" || source.includes("fallback")) return 10;
@@ -74,13 +80,14 @@ export function applySessionEvent(
   source = "protocol",
 ) {
   const sessionId = metaText(event, "sessionId") ?? `${source}:ambient`;
-  const workstreamId = metaText(event, "workstreamId") ?? metaText(event, "threadId") ?? metaText(event, "project") ?? sessionId;
-  const workstreamName = metaText(event, "workstreamName") ?? metaText(event, "project") ?? metaText(event, "sessionName") ?? "AMBIENT TASK";
-  const agentName = metaText(event, "agentName") ?? metaText(event, "sessionName") ?? "AGENT";
-  const modelProvider = metaText(event, "modelProvider") ?? "unknown";
-  const model = metaText(event, "model") ?? "unknown model";
-  const effort = metaText(event, "reasoningEffort") ?? "";
   const previous = sessions[sessionId];
+  const parentSessionId = metaText(event, "parentSessionId") ?? previous?.parentSessionId ?? "";
+  const workstreamId = metaText(event, "workstreamId") ?? metaText(event, "threadId") ?? metaText(event, "project") ?? previous?.workstreamId ?? sessionId;
+  const workstreamName = metaText(event, "workstreamName") ?? metaText(event, "project") ?? metaText(event, "sessionName") ?? previous?.workstreamName ?? "AMBIENT TASK";
+  const agentName = metaText(event, "agentName") ?? metaText(event, "sessionName") ?? previous?.agentName ?? "AGENT";
+  const modelProvider = metaText(event, "modelProvider") ?? previous?.modelProvider ?? "unknown";
+  const model = metaText(event, "model") ?? previous?.model ?? "unknown model";
+  const effort = metaText(event, "reasoningEffort") ?? previous?.effort ?? "";
   const explicitRunId = metaText(event, "turnId") ?? metaText(event, "runId");
   const beginsRun = event.kind === "session.start" || event.kind === "turn.start";
   const runId = explicitRunId ?? (beginsRun ? event.id : previous?.runId ?? sessionId);
@@ -106,7 +113,7 @@ export function applySessionEvent(
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
   return {
     ...sessions,
-    [sessionId]: { id: sessionId, runId, source, workstreamId, workstreamName, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
+    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
   };
 }
 
@@ -153,6 +160,12 @@ export function replaceSessionSnapshot(
 
 export function groupWorkstreams(sessions: Record<string, AgentSession>, now = Date.now(), completedTtlMs = 20_000) {
   const visible = Object.values(sessions).filter((session) => {
+    // An idle turn is not active work and is not an agent completion. Keep the
+    // session in reducer state so a later turn can resume it, but omit it from
+    // the board until new activity arrives.
+    if (session.state.status === "idle") return false;
+    // Successful completion is ambient and expires. Errors remain visible
+    // until the same session resumes or an authoritative snapshot removes it.
     if (session.state.status !== "complete") return true;
     return now - (session.state.endedAt ?? session.updatedAt) <= completedTtlMs;
   });
@@ -163,18 +176,23 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
     agents.sort((a, b) => (a.state.startedAt ?? a.updatedAt) - (b.state.startedAt ?? b.updatedAt) || a.id.localeCompare(b.id));
     const lead = agents[0];
     const activeAgents = agents.filter((agent) => activeStatuses.has(agent.state.status));
-    const attention = activeAgents.some((agent) => agent.state.attention);
-    const rankedActive = [...activeAgents].sort((a, b) => statusPriority[b.state.status] - statusPriority[a.state.status] || b.updatedAt - a.updatedAt);
-    const aggregate = attention ? activeAgents.find((agent) => agent.state.attention)! : rankedActive[0] ?? lead;
+    const errors = agents.filter((agent) => agent.state.status === "error");
+    // A live sibling keeps the workstream focused on current work. If nothing
+    // is live, a terminal error becomes the aggregate and remains actionable.
+    const aggregateCandidates = activeAgents.length ? activeAgents : errors.length ? errors : agents;
+    const attention = aggregateCandidates.some((agent) => agent.state.attention);
+    const rankedActive = [...aggregateCandidates].sort((a, b) => statusPriority[b.state.status] - statusPriority[a.state.status] || b.updatedAt - a.updatedAt);
+    const aggregate = attention ? aggregateCandidates.find((agent) => agent.state.attention)! : rankedActive[0] ?? lead;
     const mixedActive = new Set(activeAgents.map((agent) => agent.state.status)).size > 1;
-    const explicitLabel = activeAgents.find((agent) => !genericLabels.has(agent.state.label))?.state.label;
+    const explicitLabel = activeAgents.map(headlineLabel).find((label) => !genericLabels.has(label));
+    const aggregateLabel = headlineLabel(aggregate);
     workstreams.push({
       id,
       name: lead.workstreamName,
       agents,
       status: aggregate.state.status,
       phase: aggregate.state.phase,
-      label: attention ? aggregate.state.label : explicitLabel ?? (mixedActive ? "WORKING" : aggregate.state.label),
+      label: attention ? aggregateLabel : explicitLabel ?? (mixedActive ? "WORKING" : aggregateLabel),
       attention,
       startedAt: agents.reduce<number | null>((oldest, agent) => {
         if (agent.state.startedAt === null) return oldest;
@@ -185,6 +203,49 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
     });
   }
   return workstreams.sort((a, b) => (a.startedAt ?? a.updatedAt) - (b.startedAt ?? b.updatedAt) || a.id.localeCompare(b.id));
+}
+
+export function activeBoardWorkstreams(workstreams: Workstream[]) {
+  return workstreams
+    .filter((workstream) => workstream.agents.some((agent) => activeStatuses.has(agent.state.status)
+      || agent.state.status === "error"
+      || (agent.state.status === "complete" && agent.state.completionScope === "turn")
+      || (Boolean(agent.parentSessionId) && agent.state.status === "complete")))
+    .map((workstream) => ({
+      ...workstream,
+      // A completed sibling remains visible beside live agents for the normal
+      // terminal TTL instead of vanishing the moment it reports completion.
+      // If its parent has already gone turn-idle, the child still keeps its own
+      // DONE row without being mistaken for an overall session completion.
+      agents: workstream.agents.filter((agent) => activeStatuses.has(agent.state.status)
+        || agent.state.status === "error"
+        || (agent.state.status === "complete"
+          && (agent.state.completionScope === "turn"
+            || Boolean(agent.parentSessionId)
+            || workstream.agents.some((candidate) => activeStatuses.has(candidate.state.status))))),
+    }));
+}
+
+/** Single lifecycle projection used by the renderer. Keeping these related
+ * selections together prevents completion, attention, and board visibility
+ * from acquiring subtly different definitions in UI components. */
+export function projectWorkstreamPresentation(workstreams: Workstream[], now = Date.now(), completedTtlMs = 20_000) {
+  const agents = workstreams.flatMap((workstream) => workstream.agents);
+  const liveAgents = agents.filter((agent) => activeStatuses.has(agent.state.status));
+  const liveWorkstreams = workstreams.filter((workstream) => workstream.agents.some((agent) => activeStatuses.has(agent.state.status)));
+  const completedAgents = agents.filter((agent) => agent.state.status === "complete");
+  return {
+    activeAgents: liveAgents,
+    liveAgents,
+    liveWorkstreams,
+    attentionCount: agents.filter((agent) => agent.state.attention).length,
+    completedAgents,
+    // Only a true session end may drive the overall completion screen. A root
+    // turn completion stays on the regular board as a short-lived DONE row.
+    completedRootAgents: completedAgents.filter((agent) => !agent.parentSessionId && agent.state.completionScope === "session"),
+    recentlyDone: completedAgents.filter((agent) => now - (agent.state.endedAt ?? agent.updatedAt) <= completedTtlMs).length,
+    boardWorkstreams: activeBoardWorkstreams(workstreams),
+  };
 }
 
 export function isActiveStatus(status: AgentStatus) {

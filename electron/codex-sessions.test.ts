@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem } from "./codex-rollout";
+import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem, splitCompleteJsonLines } from "./codex-rollout";
 
 describe("Codex desktop rollout telemetry", () => {
+  it("consumes a complete final lifecycle record without waiting for a newline", () => {
+    const complete = '{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}';
+    expect(splitCompleteJsonLines(complete)).toEqual({ lines: [complete], remainder: "" });
+
+    const partial = '{"type":"event_msg","payload":{"type":"task_complete"';
+    expect(splitCompleteJsonLines(partial)).toEqual({ lines: [], remainder: partial });
+  });
+
   it("preserves the actual shell command instead of reducing it to bash", () => {
     expect(normalizeCodexRolloutItem({
       type: "CommandExecution",
@@ -9,7 +17,7 @@ describe("Codex desktop rollout telemetry", () => {
       status: "completed",
     })).toEqual({
       itemType: "commandExecution",
-      item: { command: "pnpm test", status: "completed" },
+      item: { command: "pnpm test", status: "completed", cwd: "" },
     });
   });
 
@@ -46,7 +54,18 @@ describe("Codex desktop rollout telemetry", () => {
       input: 'const result = await tools.exec_command({"cmd":"pnpm build","yield_time_ms":30000});',
     })).toEqual({
       itemType: "commandExecution",
-      item: { command: "pnpm build", status: "inProgress" },
+      item: { command: "pnpm build", status: "inProgress", cwd: "" },
+    });
+  });
+
+  it("does not revive a command that Codex already marked completed", () => {
+    expect(normalizeCodexToolCall({
+      name: "exec",
+      status: "completed",
+      input: 'const result = await tools.exec_command({"cmd":"pnpm build"});',
+    })).toEqual({
+      itemType: "commandExecution",
+      item: { command: "pnpm build", status: "completed", cwd: "" },
     });
   });
 
@@ -91,7 +110,7 @@ describe("Codex desktop rollout telemetry", () => {
     expect(merged).toBe(true);
     expect(state.items.map((item) => item.updated_at_ordinal)).toEqual([10, 11]);
     expect(state.items.map((item) => JSON.parse(item.item_json))).toEqual([
-      { command: "long-running-task", status: "completed" },
+      { command: "long-running-task", status: "completed", cwd: "" },
       { command: "quick-task", status: "inProgress" },
     ]);
     expect(state.items[0]).toMatchObject({ callId: "call-a", transient: false });
