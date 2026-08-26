@@ -130,6 +130,27 @@ export function replaceSessionSource(
   return next;
 }
 
+/** Replace an authoritative snapshot, including sources that currently emit no
+ * events. Without the explicit source list, an empty feed leaves ghost agents
+ * from the previous snapshot in memory forever. */
+export function replaceSessionSnapshot(
+  sessions: Record<string, AgentSession>,
+  events: AgentEvent[],
+  authoritativeSources: string[],
+  now = Date.now(),
+) {
+  const grouped = new Map<string, AgentEvent[]>();
+  for (const event of events) {
+    const source = metaText(event, "source") ?? "protocol";
+    grouped.set(source, [...(grouped.get(source) ?? []), event]);
+  }
+  let next = sessions;
+  for (const source of new Set([...authoritativeSources, ...grouped.keys()])) {
+    next = replaceSessionSource(next, source, grouped.get(source) ?? [], now);
+  }
+  return next;
+}
+
 export function groupWorkstreams(sessions: Record<string, AgentSession>, now = Date.now(), completedTtlMs = 20_000) {
   const visible = Object.values(sessions).filter((session) => {
     if (session.state.status !== "complete") return true;

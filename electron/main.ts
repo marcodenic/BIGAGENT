@@ -116,7 +116,7 @@ function refreshSessions(force = false) {
   if (!force && signature === previousSignature && now < safetyRefreshAt) return;
   try {
     const sessions = codexFallbackEvents();
-    telemetryHub.markSource("codex-desktop-fallback", "codex", "sqlite-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);
+    telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);
     const serialized = JSON.stringify(sessions);
     if (serialized !== previousSessions) {
       send("big-agent:sessions", sessions);
@@ -125,7 +125,7 @@ function refreshSessions(force = false) {
     previousSignature = signature;
     safetyRefreshAt = now + 15_000;
   } catch (error) {
-    telemetryHub.markSource("codex-desktop-fallback", "codex", "sqlite-fallback", "error", error instanceof Error ? error.message : String(error));
+    telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", "error", error instanceof Error ? error.message : String(error));
     console.error("Codex session refresh failed:", error);
   }
 }
@@ -139,7 +139,7 @@ function startSessionWatcher() {
 function codexFallbackEvents() {
   return codexDesktopSessions().map((event) => ({
     ...event,
-    meta: { ...(event.meta && typeof event.meta === "object" ? event.meta : {}), source: "codex-desktop-fallback", product: "codex", transport: "sqlite-fallback" },
+    meta: { ...(event.meta && typeof event.meta === "object" ? event.meta : {}), source: "codex-desktop-fallback", product: "codex", transport: "rollout-jsonl-fallback" },
   }));
 }
 

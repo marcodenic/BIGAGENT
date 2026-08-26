@@ -69,10 +69,12 @@ header button:hover { color: #efeee9; }
   --identity-width: max(170px, 22vw);
   position: relative;
   display: grid;
-  grid-template-columns: var(--identity-width) minmax(0, 1fr) minmax(118px, auto);
+  grid-template-columns: var(--identity-width) minmax(0, 1fr);
   gap: clamp(22px, 3.2vw, 58px);
   align-items: center;
   min-height: 0;
+  overflow: clip;
+  container: workstream / size;
   padding: clamp(18px, 2.3vh, 34px) 0;
   border-bottom: 1px solid #292b27;
   animation: row-arrive .3s ease both;
@@ -102,6 +104,16 @@ header button:hover { color: #efeee9; }
 }
 .project-heading > span { font: 400 clamp(13px, 1.1vw, 19px) "Geist Mono Variable", monospace; color: #85887f; }
 .identity-meta { display: flex; align-items: center; gap: 12px; min-width: 0; margin-top: clamp(10px, 1.35vh, 19px); }
+.agent-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a6a99f;
+  font: 500 clamp(8px, .7vw, 11px) "Geist Mono Variable", monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
 .model-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .provider-icons { display: flex; align-items: center; flex: none; }
 .provider-icons i {
@@ -152,7 +164,7 @@ header button:hover { color: #efeee9; }
 .state-dot.status-error, .agent-line.status-error .agent-pulse { background: var(--error); box-shadow: 0 0 15px #ff625780; }
 .needs-attention .state-dot.status-waiting, .needs-attention .state-dot.status-approval { animation: urgent 1.25s ease-in-out infinite; }
 
-.workstream-activity { min-width: 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
+.workstream-activity { min-width: 0; min-height: 0; overflow: hidden; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
 .matrix-face {
   position: absolute;
   z-index: 1;
@@ -217,7 +229,6 @@ header button:hover { color: #efeee9; }
   padding-block: clamp(2px, .35vh, 5px);
   line-height: 1.22;
   transition: opacity .45s ease;
-  animation: step-arrive .4s ease both;
 }
 .agent-step:first-child { min-height: clamp(34px, 4vh, 50px); }
 .agent-line:first-child { border-top-color: #34372f; }
@@ -301,9 +312,20 @@ header button:hover { color: #efeee9; }
 .agent-plan li[data-state="current"] i { border-color: var(--status-color); background: var(--status-color); color: #10120d; box-shadow: 0 0 16px color-mix(in srgb, var(--status-color) 45%, transparent); }
 .agent-plan li[data-state="complete"] { color: #7c8f80; }
 .agent-plan li[data-state="complete"] i { border-color: var(--complete); color: var(--complete); }
+.rolling-activity { position: relative; min-width: 0; }
 .telemetry-step { opacity: .88; }
 .telemetry-depth-1 { opacity: .68; }
 .telemetry-depth-2 { opacity: .5; }
+.telemetry-depth-3 { opacity: .34; }
+.telemetry-depth-4 { opacity: .2; }
+.rolling-activity .is-exiting {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  animation: activity-exit .3s ease forwards;
+}
 .extra-agents { margin: 9px 0 0 43px; font: 400 9px "Geist Mono Variable", monospace; letter-spacing: .11em; color: #73766d; }
 
 .workstream time {
@@ -316,8 +338,13 @@ header button:hover { color: #efeee9; }
   white-space: nowrap;
 }
 .workstream-visual {
-  align-self: stretch;
-  min-width: clamp(120px, 17vw, 300px);
+  position: absolute;
+  z-index: 2;
+  top: clamp(18px, 2.3vh, 34px);
+  right: 0;
+  bottom: clamp(18px, 2.3vh, 34px);
+  width: max-content;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -325,8 +352,8 @@ header button:hover { color: #efeee9; }
 }
 .workstream-visual time { align-self: flex-end; }
 .agent-preview {
-  --preview-max-width: clamp(130px, 16vw, 280px);
-  --preview-height: min(16vh, 155px);
+  --preview-max-width: clamp(160px, 18vw, 320px);
+  --preview-height: min(18vh, 190px);
   width: fit-content;
   max-width: var(--preview-max-width);
   margin: auto 0 0;
@@ -351,7 +378,7 @@ header button:hover { color: #efeee9; }
 .workstream.needs-attention time { color: var(--attention); }
 .workstream.status-complete time { color: var(--complete); }
 
-.board-count-1 .workstream { --identity-width: max(210px, 20vw); grid-template-columns: var(--identity-width) minmax(0, 1fr) auto; gap: clamp(30px, 4vw, 76px); }
+.board-count-1 .workstream { --identity-width: max(210px, 20vw); grid-template-columns: var(--identity-width) minmax(0, 1fr); gap: clamp(30px, 4vw, 76px); }
 .board-count-1 .state-label { font-size: clamp(2.6rem, min(10.8cqi, 17vmin), 10.25rem); }
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
 .board-count-1 .matrix-face { top: 59%; width: min(calc(var(--identity-width) * .94), 315px); }
@@ -371,15 +398,63 @@ header button:hover { color: #efeee9; }
 .board-count-3 .state-label { font-size: clamp(2.2rem, min(7.2cqi, 9vmin), 5.75rem); }
 .board-count-4 .state-label, .board-count-5 .state-label { font-size: clamp(2rem, min(5.8cqi, 7.6vmin), 4.75rem); margin-bottom: 8px; }
 .board-count-4 .workstream, .board-count-5 .workstream { padding: 12px 0; }
-.board-count-3 .agent-preview, .board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-max-width: clamp(110px, 12vw, 210px); }
-.board-count-3 .agent-preview { --preview-height: min(9vh, 90px); }
-.board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-height: min(6vh, 62px); }
+.board-count-3 .agent-preview, .board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-max-width: clamp(150px, 15vw, 270px); }
+.board-count-3 .agent-preview { --preview-height: min(13vh, 130px); }
+.board-count-4 .agent-preview, .board-count-5 .agent-preview { --preview-max-width: clamp(140px, 13vw, 230px); --preview-height: min(9vh, 95px); }
 .board-count-4 .agent-preview figcaption, .board-count-5 .agent-preview figcaption { display: none; }
 .layout-compact .workstream { padding: clamp(7px, 1.4vh, 16px) 0; }
 .layout-compact .state-label { margin-bottom: 6px; }
 .layout-compact .agent-step { min-height: clamp(18px, 2.3vh, 27px); }
 .layout-compact .agent-step:first-child { min-height: clamp(24px, 3vh, 34px); }
 .layout-compact .matrix-face { top: 68%; width: min(calc(var(--identity-width) * .74), 205px); }
+
+/* Scale the complete information stack from the row's actual block size. This
+   avoids the false assumption that a wide viewport also guarantees a tall row. */
+@container workstream (max-height: 300px) {
+  .workstream .state-label {
+    margin-bottom: min(4px, 1.5cqh);
+    font-size: clamp(1.75rem, min(5.2cqi, 28cqh), 4rem);
+  }
+  .workstream .agent-focus {
+    min-height: 0;
+    padding-block: min(4px, 1.5cqh);
+    font-size: clamp(18px, min(2.1cqw, 11cqh), 32px);
+    line-height: 1.04;
+  }
+  .workstream .agent-context {
+    padding-bottom: min(3px, 1cqh);
+    font-size: clamp(8px, min(.75cqi, 4.5cqh), 12px);
+  }
+  .workstream .agent-step,
+  .workstream .agent-step:first-child {
+    min-height: min(22px, 8cqh);
+    padding-block: 1px;
+    font-size: clamp(9px, min(.9cqi, 4.5cqh), 14px);
+  }
+  .workstream .agent-plan { padding-block: min(4px, 1.5cqh); }
+}
+
+@container workstream (max-height: 220px) {
+  .workstream .state-label { font-size: clamp(1.55rem, min(4.8cqi, 24cqh), 3.5rem); }
+  .workstream .agent-focus { font-size: clamp(16px, min(1.85cqw, 9.5cqh), 27px); }
+  .workstream .agent-step,
+  .workstream .agent-step:first-child { min-height: min(19px, 7cqh); }
+}
+
+/* Content-aware fallbacks handle rows containing more agents or plan content
+   than their siblings. Only the overflowing row gives up secondary density. */
+.workstream-activity[data-fit="compact"] .state-label { font-size: clamp(1.5rem, min(4.6cqi, 22cqh), 3.4rem); }
+.workstream-activity[data-fit="compact"] .agent-focus { min-height: 0; padding-block: 2px; font-size: clamp(15px, min(1.75cqw, 8.5cqh), 25px); }
+.workstream-activity[data-fit="compact"] .agent-context { padding-bottom: 1px; font-size: clamp(8px, min(.7cqi, 4cqh), 11px); }
+.workstream-activity[data-fit="compact"] .agent-step,
+.workstream-activity[data-fit="compact"] .agent-step:first-child { min-height: min(18px, 6.5cqh); padding-block: 0; }
+.workstream-activity[data-fit="compact"] .agent-plan { padding-block: 2px; }
+.workstream-activity[data-fit="tight"] .state-label { font-size: clamp(1.35rem, min(4.2cqi, 19cqh), 3rem); }
+.workstream-activity[data-fit="tight"] .agent-focus { min-height: 0; padding-block: 1px; font-size: clamp(14px, min(1.55cqw, 7.5cqh), 22px); }
+.workstream-activity[data-fit="tight"] .agent-context { padding: 0; }
+.workstream-activity[data-fit="tight"] .telemetry-depth-3,
+.workstream-activity[data-fit="tight"] .telemetry-depth-4 { display: none; }
+.workstream-activity[data-fit="tight"] .agent-plan li:not([data-state="current"]) { display: none; }
 
 /* Once more than five live agents need attention, each gets an equal tile.
    The current state and animated face remain visible; the active plan step is
@@ -403,7 +478,8 @@ header button:hover { color: #efeee9; }
 .agent-tile-board .state-dot { width: 6px; height: 6px; }
 .agent-tile-board .provider-icons i { width: 20px; height: 20px; }
 .agent-tile-board .provider-icons i + i { margin-left: -6px; }
-.agent-tile-board .model-identity small { display: none; }
+.agent-tile-board .model-identity small { display: block; font-size: clamp(7px, .58vw, 9px); }
+.agent-tile-board .agent-names { font-size: clamp(7px, .58vw, 9px); }
 .agent-tile-board .matrix-face { top: 38.5%; width: min(calc(var(--identity-width) * .85), 112px); }
 .agent-tile-board .workstream-visual { position: absolute; top: clamp(11px, 1.4vh, 21px); right: clamp(11px, 1.4vw, 21px); display: block; min-width: 0; }
 .agent-tile-board .workstream time { padding: 0; font-size: clamp(14px, 1.45vw, 25px); }
@@ -426,15 +502,30 @@ header button:hover { color: #efeee9; }
 /* Portrait displays have vertical room, so stop forcing the landscape's three
    major columns into a narrow strip. The timer/preview become a right rail. */
 .layout-portrait .workstream {
-  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   column-gap: clamp(24px, 3.2vw, 44px);
   row-gap: clamp(16px, 2vh, 30px);
   align-items: stretch;
 }
 .layout-portrait .workstream-identity { grid-column: 1; grid-row: 1; align-self: start; }
-.layout-portrait .workstream-activity { grid-column: 1; grid-row: 2; align-self: start; padding-top: clamp(20px, 3vh, 44px); }
-.layout-portrait .workstream-visual { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
+.layout-portrait .workstream-activity {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  padding-top: clamp(20px, 3vh, 44px);
+  padding-left: clamp(110px, 15vw, 170px);
+}
+.layout-portrait .workstream-visual {
+  position: absolute;
+  inset: clamp(12px, 1.8vh, 28px) 0 auto auto;
+  bottom: auto;
+  height: auto;
+  align-self: auto;
+  display: block;
+  min-width: 0;
+}
+.layout-portrait .workstream time { padding: 0; font-size: clamp(28px, 5.4vw, 60px); }
 .layout-portrait .state-label { font-size: clamp(2.2rem, min(10cqi, 10vmin), 5.75rem); }
 .layout-portrait .workstream-identity h2 { font-size: clamp(20px, 3.2vw, 34px); }
 .layout-portrait .agent-line { font-size: clamp(11px, 1.65vw, 17px); }
@@ -442,11 +533,85 @@ header button:hover { color: #efeee9; }
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
 .layout-portrait .matrix-face {
-  left: auto;
-  right: clamp(20px, 4.5vw, 58px);
-  top: 25%;
-  transform: translateY(-50%);
+  left: clamp(38px, 5vw, 64px);
+  right: auto;
+  top: 40%;
+  transform: translate(-50%, -50%);
   width: clamp(82px, 14vw, 150px);
+}
+
+/* Dense portrait boards need their own hierarchy. Preserve the tile's left
+   identity/face rail and keep the clock above, not beside, the activity. */
+.layout-portrait.agent-tile-board.board-count-6 .workstream-board {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.layout-portrait.agent-tile-board.board-count-7 .workstream-board,
+.layout-portrait.agent-tile-board.board-count-8 .workstream-board,
+.layout-portrait.agent-tile-board.board-count-9 .workstream-board {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.layout-portrait.agent-tile-board .workstream {
+  grid-template-columns: var(--identity-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: clamp(12px, 1.4vw, 24px);
+  padding: clamp(11px, 1.4vh, 21px);
+}
+.layout-portrait.agent-tile-board .workstream-identity {
+  position: absolute;
+  z-index: 3;
+  inset: clamp(11px, 1.4vh, 21px) clamp(120px, 16vw, 160px) auto clamp(11px, 1.4vw, 21px);
+  height: auto;
+}
+.layout-portrait.agent-tile-board .workstream-identity h2 {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  text-wrap: balance;
+  line-height: 1;
+}
+.layout-portrait.agent-tile-board .identity-meta { flex-wrap: wrap; row-gap: 4px; }
+.layout-portrait.agent-tile-board .workstream-activity {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  padding: clamp(32px, 5vh, 58px) 0 0;
+}
+.layout-portrait.agent-tile-board .workstream-visual {
+  position: absolute;
+  inset: clamp(11px, 1.4vh, 21px) clamp(11px, 1.4vw, 21px) auto auto;
+  display: block;
+}
+.layout-portrait.agent-tile-board .workstream time { font-size: clamp(18px, 2.4vw, 32px); }
+.layout-portrait.agent-tile-board .workstream-identity h2 { font-size: clamp(16px, 2vw, 24px); }
+.layout-portrait.agent-tile-board .state-label {
+  margin-bottom: clamp(6px, .8vh, 11px);
+  padding-right: 0;
+  font-size: clamp(2.35rem, min(11cqi, 5.6vmin), 4rem);
+}
+.layout-portrait.agent-tile-board .agent-focus { font-size: clamp(18px, 2.35vw, 30px); }
+.layout-portrait.agent-tile-board .matrix-face {
+  left: calc(var(--identity-width) / 2);
+  top: 43%;
+  width: min(calc(var(--identity-width) * .85), 112px);
+}
+.layout-portrait.agent-tile-board.board-count-7 .state-label,
+.layout-portrait.agent-tile-board.board-count-8 .state-label,
+.layout-portrait.agent-tile-board.board-count-9 .state-label { font-size: clamp(1.9rem, min(9cqi, 4.5vmin), 3.25rem); }
+.layout-portrait.agent-tile-board.board-count-7 .agent-focus,
+.layout-portrait.agent-tile-board.board-count-8 .agent-focus,
+.layout-portrait.agent-tile-board.board-count-9 .agent-focus { font-size: clamp(16px, 1.8vw, 23px); }
+
+@media (min-width: 761px) {
+  .layout-portrait.agent-tile-board.board-count-6 .workstream { --identity-width: clamp(92px, 11vw, 128px); }
+}
+
+@media (max-width: 760px) {
+  .layout-portrait.agent-tile-board .workstream-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(auto-fit, minmax(0, 1fr));
+  }
 }
 
 /* Respond to the feed's real width, not the overall window width. The identity
@@ -545,7 +710,7 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 @keyframes urgent { 50% { transform: scale(1.55); box-shadow: 0 0 25px #ffb51db0; } }
 @keyframes row-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes panel-arrive { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
-@keyframes step-arrive { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes activity-exit { to { opacity: 0; transform: translateY(9px) scale(.985); } }
 @keyframes preview-arrive { from { opacity: 0; transform: translateY(6px); } }
 @keyframes matrix-breathe { 50% { opacity: .94; } }
 @keyframes matrix-attention { 50% { opacity: 1; filter: brightness(1.18); } }
@@ -564,6 +729,17 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
   .model-identity small { max-width: 18ch; }
   .provider-icons i { width: 21px; height: 21px; }
   .matrix-face { display: none; }
+  .layout-portrait .workstream-visual { position: absolute; inset: 10px 0 auto auto; bottom: auto; height: auto; align-self: auto; display: block; }
+  .layout-portrait .workstream time { font-size: clamp(25px, 7vw, 44px); }
+  .layout-portrait .workstream-activity { padding: clamp(16px, 3vh, 30px) 0 0 clamp(96px, 18vw, 126px); }
+  .layout-portrait .matrix-face {
+    display: block;
+    left: clamp(28px, 7vw, 44px);
+    right: auto;
+    top: 32%;
+    transform: translate(-50%, -50%);
+    width: clamp(68px, 14vw, 96px);
+  }
   .model-identity small { font-size: 7px; }
   .board-count-1 .state-label,
   .board-count-2 .state-label,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeSimpleEvent } from "./protocol";
-import { applySessionEvent, groupWorkstreams, replaceSessionSource } from "./workstreams";
+import { applySessionEvent, groupWorkstreams, replaceSessionSnapshot, replaceSessionSource } from "./workstreams";
 
 function event(sessionId: string, threadId: string, status: "thinking" | "testing" | "waiting" | "complete", detail: string) {
   return normalizeSimpleEvent({ status, detail, meta: { sessionId, threadId, workstreamName: "PROPER LINUX", agentName: `Agent ${sessionId}` } }, sessionId);
@@ -43,6 +43,15 @@ describe("workstream projection", () => {
     expect(Object.keys(sessions)).toEqual(["01"]);
     const completedOnly = applySessionEvent({}, done, 1_000, "codex");
     expect(groupWorkstreams(completedOnly, 21_001)).toHaveLength(0);
+  });
+
+  it("removes ghost agents when an authoritative source becomes empty", () => {
+    const running = event("01", "project", "thinking", "Planning");
+    running.meta = { ...running.meta, source: "codex-desktop-fallback" };
+    let sessions = replaceSessionSnapshot({}, [running], ["codex-desktop-fallback"], 1_000);
+    expect(Object.keys(sessions)).toEqual(["01"]);
+    sessions = replaceSessionSnapshot(sessions, [], ["codex-desktop-fallback"], 2_000);
+    expect(sessions).toEqual({});
   });
 
   it("retains recent activity for sessions that remain in a snapshot", () => {

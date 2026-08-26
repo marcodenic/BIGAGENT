@@ -16,7 +16,7 @@ import {
   applySessionEvent,
   groupWorkstreams,
   isActiveStatus,
-  replaceSessionSource,
+  replaceSessionSnapshot,
   type AgentSession,
   type Workstream,
 } from "./core/workstreams";
@@ -154,9 +154,9 @@ function ModelIdentity({ agents }: { agents: AgentSession[] }) {
 
 function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
   const seen = new Set<string>();
-  return agent.state.recent.flatMap((event) => {
+  return agent.state.recent.flatMap((event, eventIndex) => {
     const status = event.status ?? "working";
-    if (event.meta?.activityClass === "telemetry" && status === "thinking" && !event.tool && !event.command) return [];
+    if (eventIndex > 0 && event.meta?.activityClass === "telemetry" && status === "thinking" && !event.tool && !event.command) return [];
     const label = event.label?.toUpperCase() || activityLabels[status];
     const tool = event.tool || (event.command ? commandName(event.command) : "");
     const rawDetail = event.detail || event.command || (event.files?.length ? `Updating ${event.files.slice(0, 2).join(", ")}` : "Working");
@@ -169,11 +169,90 @@ function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
     const declaredKind = event.meta?.narrativeKind;
     const narrativeKind = declaredKind === "reasoning" || event.kind === "reasoning.summary"
       ? "reasoning"
+      : event.kind === "plan"
+        ? "plan"
       : declaredKind === "message" || narrative
         ? "message"
         : null;
-    return [{ id: event.id, status, label, tool, detail, target, narrativeKind }];
+    return [{ id: event.id, status, phase: event.phase, label, tool, detail, target, narrativeKind }];
   }).slice(0, limit);
+}
+
+type ActivityStep = ReturnType<typeof activitySteps>[number];
+
+function readableTool(tool: string) {
+  return tool.replaceAll("_", " ").replaceAll("-", " ").trim();
+}
+
+function headlineDetail(step: ActivityStep) {
+  if (step.narrativeKind) return step.detail;
+  if (step.phase === "receiving" || step.label === "RESULT RECEIVED") return step.tool ? `${readableTool(step.tool)} finished` : "Processing a result";
+  if (step.status === "testing") return "Running the test suite";
+  if (step.status === "editing") return step.target ? `Updating ${step.target.split(/[\\/]/).pop()}` : "Updating the implementation";
+  if (step.status === "searching") return step.target ? `Inspecting ${step.target.split(/[\\/]/).pop()}` : "Inspecting the current state";
+  if (step.phase === "delegating") return "Coordinating another agent";
+  if (step.status === "command" || step.phase === "executing") return step.tool ? `Using ${readableTool(step.tool)}` : "Running a command";
+  return step.detail;
+}
+
+function RollingActivity({ steps }: { steps: ActivityStep[] }) {
+  const signature = steps.map((step) => `${step.id}\u0000${step.status}\u0000${step.detail}`).join("\u0001");
+  const [rendered, setRendered] = useState(() => steps.map((step) => ({ step, exiting: false })));
+  const positions = useRef(new Map<string, number>());
+  const container = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const currentIds = new Set(steps.map((step) => step.id));
+    setRendered((previous) => [
+      ...steps.map((step) => ({ step, exiting: false })),
+      ...previous.filter((item) => !currentIds.has(item.step.id) && !item.exiting).map((item) => ({ ...item, exiting: true })),
+    ]);
+    const cleanup = window.setTimeout(() => {
+      setRendered((current) => current.filter((item) => currentIds.has(item.step.id)));
+    }, 320);
+    return () => window.clearTimeout(cleanup);
+  }, [signature]);
+
+  useLayoutEffect(() => {
+    const elements = [...(container.current?.querySelectorAll<HTMLElement>("[data-activity-id]") ?? [])];
+    const nextPositions = new Map<string, number>();
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    for (const element of elements) {
+      const id = element.dataset.activityId;
+      if (!id || element.classList.contains("is-exiting")) continue;
+      const top = element.getBoundingClientRect().top;
+      nextPositions.set(id, top);
+      if (reduceMotion) continue;
+      const previousTop = positions.current.get(id);
+      if (previousTop === undefined) {
+        element.animate([
+          { opacity: 0, transform: "translateY(-10px) scale(.985)" },
+          { opacity: Number.parseFloat(getComputedStyle(element).opacity), transform: "none" },
+        ], { duration: 300, easing: "cubic-bezier(.2,.8,.2,1)" });
+      } else if (Math.abs(previousTop - top) > 1) {
+        element.animate([
+          { transform: `translateY(${previousTop - top}px)` },
+          { transform: "none" },
+        ], { duration: 360, easing: "cubic-bezier(.2,.8,.2,1)" });
+      }
+    }
+    positions.current = nextPositions;
+  }, [rendered]);
+
+  return <div ref={container} className="rolling-activity" aria-label="Recent agent activity">
+    {rendered.map(({ step, exiting }, index) => <div
+      key={step.id}
+      data-activity-id={step.id}
+      className={`agent-step telemetry-step telemetry-depth-${Math.min(index, 4)} ${step.tool ? "has-tool" : "no-tool"} status-${step.status} ${exiting ? "is-exiting" : ""}`}
+    >
+      <i className="history-mark" aria-hidden="true">·</i>
+      <span className="agent-number" />
+      <strong>{step.label}</strong>
+      {step.tool && <span className="agent-tool">· {step.tool}</span>}
+      <span className="agent-detail">{step.detail}</span>
+      {step.target && <span className="agent-target">{step.target}</span>}
+    </div>)}
+  </div>;
 }
 
 function planStepState(step: string, index: number) {
@@ -221,6 +300,42 @@ function FittedStateLabel({ label }: { label: string }) {
   return <h1 ref={heading} className="state-label">{label}</h1>;
 }
 
+function ContentFittedActivity({ children }: { children: React.ReactNode }) {
+  const activity = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = activity.current;
+    if (!element) return;
+    let frame = 0;
+    const overflows = () => {
+      const bounds = element.getBoundingClientRect();
+      return [...element.children].some((child) => {
+        const content = child.getBoundingClientRect();
+        return content.top < bounds.top - 1 || content.bottom > bounds.bottom + 1;
+      });
+    };
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        for (const density of ["roomy", "compact", "tight"]) {
+          element.dataset.fit = density;
+          if (!overflows()) break;
+        }
+      });
+    };
+    const resize = new ResizeObserver(fit);
+    const mutation = new MutationObserver(fit);
+    resize.observe(element);
+    mutation.observe(element, { childList: true, characterData: true, subtree: true });
+    fit();
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      mutation.disconnect();
+    };
+  }, []);
+  return <div ref={activity} className="workstream-activity" data-fit="roomy">{children}</div>;
+}
+
 function latestImagePath(agent: AgentSession) {
   return agent.state.recent.find((event) => event.tool === "view_image" && typeof event.target === "string")?.target ?? "";
 }
@@ -252,40 +367,18 @@ function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
 
 function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
   const available = activitySteps(agent, privacy, 80);
-  const reasoning = available.find((step) => step.narrativeKind === "reasoning");
-  const message = available.find((step) => step.narrativeKind === "message");
-  // Keep this a single room-scale detail: a second prose block turns one
-  // status marker into an unreadable wall of text.
-  const focus = message ?? reasoning ?? available[0];
-  const context = available.find((step) => step.id !== focus?.id && (step.tool || step.target));
-  const contextDescription = context
-    ? context.target || (context.detail !== context.tool && context.detail !== focus?.detail ? context.detail : "COMMAND IN PROGRESS")
-    : "";
-  // The prominent context row counts as the newest action. Keep enough compact
-  // telemetry beneath it to make the previous three actions visible.
-  const telemetryLimit = Math.min(context ? 2 : 3, Math.max(1, trailLimit));
-  const telemetry = available
-    .filter((step) => step.narrativeKind === null && step.id !== focus?.id && step.id !== context?.id)
-    .slice(0, telemetryLimit);
+  // Public narrative owns the room-scale line. Tool commands remain available
+  // in the compact rolling history, where operational detail belongs.
+  const focus = available.find((step) => step.narrativeKind !== null) ?? available[0];
+  const telemetry = available.filter((step) => step.narrativeKind === null).slice(0, Math.max(3, trailLimit));
   return <li className={`agent-line status-${agent.state.status}`}>
     {focus && <div className={`agent-focus status-${focus.status}`}>
       <i className="agent-pulse" aria-hidden="true" />
       <span className="agent-number">{String(index + 1).padStart(2, "0")}</span>
-      <span className="agent-focus-copy">{focus.detail}</span>
-    </div>}
-    {context && <div className="agent-context">
-      {context.tool && <span className="agent-context-tool"><i aria-hidden="true">›</i><b>{context.tool}</b></span>}
-      {contextDescription && <em>{contextDescription}</em>}
+      <span className="agent-focus-copy">{headlineDetail(focus)}</span>
     </div>}
     <AgentPlan plan={agent.state.plan} privacy={privacy} />
-    {telemetry.map((step, depth) => <div key={step.id} className={`agent-step telemetry-step telemetry-depth-${depth} ${step.tool ? "has-tool" : "no-tool"} status-${step.status}`}>
-      <i className="history-mark" aria-hidden="true">·</i>
-      <span className="agent-number" />
-      <strong>{step.label}</strong>
-      {step.tool && <span className="agent-tool">· {step.tool}</span>}
-      <span className="agent-detail">{step.detail}</span>
-      {step.target && <span className="agent-target">{step.target}</span>}
-    </div>)}
+    <RollingActivity steps={telemetry} />
   </li>;
 }
 
@@ -309,6 +402,8 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
+  const agentNames = [...new Set(workstream.agents.map((agent) => agent.agentName))];
+  const agentLabel = `${agentNames[0] ?? "AGENT"}${agentNames.length > 1 ? ` +${agentNames.length - 1}` : ""}`;
   return <article className={`workstream status-${workstream.status} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
       <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
@@ -316,15 +411,16 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
         <div className="workstream-dots" aria-label={`${workstream.agents.length} agents`}>
           {workstream.agents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
         </div>
+        <span className="agent-names" title={agentNames.join(" + ")}>{agentLabel}</span>
         <ModelIdentity agents={workstream.agents} />
       </div>
     </div>
     <FaceVisual status={workstream.status} phase={workstream.phase} label={workstream.label} seed={faceHash(workstream.id)} personality={personality} attention={workstream.attention} />
-    <div className="workstream-activity">
+    <ContentFittedActivity>
       <FittedStateLabel label={workstream.label} />
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
       {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
-    </div>
+    </ContentFittedActivity>
     <div className="workstream-visual"><WorkstreamElapsed workstream={workstream} /><AgentPreview path={previewPath} privacy={privacy} /></div>
   </article>;
 }
@@ -364,11 +460,10 @@ function App() {
     .map((workstream) => (workstream.endedAt ?? workstream.updatedAt) + 20_000));
   const recentNow = useDeadlineClock(recentDeadline);
   const recentlyDone = workstreams.filter((workstream) => workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000).length;
-  const boardWorkstreams = liveWorkstreams.length ? workstreams.flatMap((workstream) => {
-    const live = workstream.agents.filter(isLiveAgent);
-    if (live.length) return [{ ...workstream, agents: live }];
-    return workstream.status === "complete" && recentNow - (workstream.endedAt ?? workstream.updatedAt) <= 20_000 ? [workstream] : [];
-  }) : [];
+  const boardWorkstreams = liveWorkstreams.map((workstream) => ({
+    ...workstream,
+    agents: workstream.agents.filter(isLiveAgent),
+  }));
   const boardAgents = boardWorkstreams.flatMap((workstream) => workstream.agents);
   const useAgentTiles = boardAgents.length > 5;
   const displayWorkstreams = useAgentTiles
@@ -387,24 +482,19 @@ function App() {
     let stopSnapshots: (() => void) | undefined;
     let stopProtocol: (() => void) | undefined;
     const sourceFor = (event: AgentEvent, fallback: string) => typeof event.meta?.source === "string" && event.meta.source ? event.meta.source : fallback;
-    const replaceSnapshot = (payloads: unknown, fallbackSource = "codex-desktop-fallback") => {
+    const replaceSnapshot = (payloads: unknown, fallbackSource = "codex-desktop-fallback", authoritativeSources?: string[]) => {
       if (disposed || !Array.isArray(payloads)) return;
-      const events = payloads.map((payload) => genericJsonlAdapter.ingest(payload)).filter((event): event is AgentEvent => event !== null);
-      const grouped = new Map<string, AgentEvent[]>();
-      for (const event of events) {
+      const events = payloads.map((payload) => genericJsonlAdapter.ingest(payload)).filter((event): event is AgentEvent => event !== null).map((event) => {
         const source = sourceFor(event, fallbackSource);
-        grouped.set(source, [...(grouped.get(source) ?? []), event]);
-      }
-      setSessions((old) => {
-        let next = old;
-        for (const [source, sourceEvents] of grouped) next = replaceSessionSource(next, source, sourceEvents);
-        return next;
+        return { ...event, meta: { ...event.meta, source } };
       });
+      const sources = authoritativeSources ?? [...new Set(events.map((event) => sourceFor(event, fallbackSource)))];
+      setSessions((old) => replaceSessionSnapshot(old, events, sources));
       setSyncError("");
     };
     const connect = async () => {
       try {
-        stopSnapshots = desktop.onSessions(replaceSnapshot);
+        stopSnapshots = desktop.onSessions((payloads) => replaceSnapshot(payloads, "codex-desktop-fallback", ["codex-desktop-fallback"]));
         stopProtocol = desktop.onEvent((payload) => {
           const event = genericJsonlAdapter.ingest(payload) ?? codexAdapter.ingest(payload);
           if (event) apply(event, sourceFor(event, "protocol"));

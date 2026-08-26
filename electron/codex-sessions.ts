@@ -1,10 +1,11 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { StringDecoder } from "node:string_decoder";
+import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle } from "./codex-rollout";
 
 type JsonObject = Record<string, unknown>;
-type RolloutContext = { parentThread: string; cwd: string; modelProvider: string };
 type ThreadDisplayMeta = {
   workstreamId: string;
   workstreamName: string;
@@ -15,18 +16,40 @@ type ThreadDisplayMeta = {
   reasoningEffort: string;
 };
 
-type TurnRow = {
-  thread_id: string;
-  turn_id: string;
-  status: string;
-  latest: number;
-  started_at: number;
-  completed_at: number | null;
-};
-
 type ItemRow = { item_type: string; item_json: string; updated_at_ordinal: number };
 
-const rolloutContexts = new Map<string, RolloutContext | null>();
+type LiveRolloutItem = ItemRow & { timestamp: number; callId?: string; transient?: boolean };
+type LiveRolloutState = {
+  offset: number;
+  decoder: StringDecoder;
+  discardInitialLine: boolean;
+  remainder: string;
+  turnId: string;
+  status: string;
+  startedAt: number;
+  completedAt: number | null;
+  nextOrdinal: number;
+  items: LiveRolloutItem[];
+};
+
+type StateThreadRow = {
+  id: string;
+  rollout_path: string;
+  updated_at_ms: number;
+  title: string;
+  cwd: string;
+  model_provider: string;
+  model: string | null;
+  reasoning_effort: string | null;
+  agent_nickname: string | null;
+  agent_role: string | null;
+};
+
+type AgentLoopExitRow = { thread_id: string; exited_at: number };
+
+const liveRollouts = new Map<string, LiveRolloutState>();
+const INITIAL_ROLLOUT_TAIL_BYTES = 8 * 1024 * 1024;
+const MAX_LIVE_ITEMS = 80;
 
 function queryOne<T>(database: DatabaseSync, sql: string, ...params: SQLInputValue[]) {
   return database.prepare(sql).get(...params) as T | undefined;
@@ -62,12 +85,183 @@ function parseJson(value: string): JsonObject {
   }
 }
 
+function timestampSeconds(value: unknown, fallback = Date.now() / 1_000) {
+  if (typeof value === "number" && Number.isFinite(value)) return value > 10_000_000_000 ? value / 1_000 : value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed / 1_000;
+  }
+  return fallback;
+}
+
+function emptyLiveRollout(offset = 0): LiveRolloutState {
+  return {
+    offset,
+    decoder: new StringDecoder("utf8"),
+    discardInitialLine: offset > 0,
+    remainder: "",
+    turnId: "",
+    status: "inProgress",
+    startedAt: Date.now() / 1_000,
+    completedAt: null,
+    nextOrdinal: offset,
+    items: [],
+  };
+}
+
+function pushLiveItem(
+  state: LiveRolloutState,
+  normalized: ReturnType<typeof normalizeCodexRolloutItem>,
+  timestamp: number,
+  callId?: string,
+  transient = false,
+) {
+  if (!normalized.itemType) return;
+  state.items.push({
+    item_type: normalized.itemType,
+    item_json: JSON.stringify(normalized.item),
+    updated_at_ordinal: state.nextOrdinal,
+    timestamp,
+    callId,
+    transient,
+  });
+  state.nextOrdinal += 1;
+  if (state.items.length > MAX_LIVE_ITEMS) state.items.splice(0, state.items.length - MAX_LIVE_ITEMS);
+}
+
+function completeLiveCall(state: LiveRolloutState, callId: string, timestamp: number) {
+  const active = state.items.find((item) => item.callId === callId && item.transient);
+  if (!active) return;
+  const matchingResult = state.items.some((item) => !item.transient
+    && item.item_type === active.item_type
+    && item.timestamp >= active.timestamp);
+  if (matchingResult) {
+    state.items = state.items.filter((item) => item !== active);
+    return;
+  }
+  const item = parseJson(active.item_json);
+  item.status = "completed";
+  active.item_json = JSON.stringify(item);
+  active.timestamp = timestamp;
+  active.transient = false;
+}
+
+function updateLiveRollout(path: string) {
+  let metadata;
+  try {
+    metadata = statSync(path);
+  } catch {
+    liveRollouts.delete(path);
+    return null;
+  }
+
+  let state = liveRollouts.get(path);
+  if (!state || metadata.size < state.offset) {
+    const start = Math.max(0, metadata.size - INITIAL_ROLLOUT_TAIL_BYTES);
+    state = emptyLiveRollout(start);
+    liveRollouts.set(path, state);
+  }
+  if (metadata.size === state.offset) return state;
+
+  const descriptor = openSync(path, "r");
+  let chunk = "";
+  try {
+    const length = metadata.size - state.offset;
+    const buffer = Buffer.alloc(length);
+    const count = readSync(descriptor, buffer, 0, length, state.offset);
+    chunk = state.decoder.write(buffer.subarray(0, count));
+    state.offset += count;
+  } finally {
+    closeSync(descriptor);
+  }
+
+  let source = state.remainder + chunk;
+  if (state.discardInitialLine) {
+    const firstBreak = source.indexOf("\n");
+    if (firstBreak < 0) {
+      state.remainder = "";
+      return state;
+    }
+    source = source.slice(firstBreak + 1);
+    state.discardInitialLine = false;
+  }
+  const lines = source.split("\n");
+  state.remainder = lines.pop() || "";
+
+  for (const line of lines) {
+    const entry = parseJson(line);
+    const payload = object(entry.payload);
+    const timestamp = timestampSeconds(entry.timestamp);
+    if (entry.type === "response_item") {
+      const responseType = text(payload.type);
+      const callId = text(payload.call_id, text(payload.callId));
+      if (responseType === "custom_tool_call" && callId) {
+        state.items = state.items.filter((item) => item.callId !== callId);
+        pushLiveItem(state, normalizeCodexToolCall(payload), timestamp, callId, true);
+      } else if (responseType === "custom_tool_call_output" && callId) {
+        completeLiveCall(state, callId, timestamp);
+      }
+      continue;
+    }
+    if (entry.type !== "event_msg") continue;
+    const eventType = text(payload.type);
+    const turnId = text(payload.turn_id, text(payload.turnId));
+    if (eventType === "task_started" && turnId) {
+      state.turnId = turnId;
+      state.status = "inProgress";
+      state.startedAt = timestampSeconds(payload.started_at, timestamp);
+      state.completedAt = null;
+      state.items = [];
+      continue;
+    }
+    if (eventType === "task_complete" && turnId && turnId === state.turnId) {
+      state.status = "completed";
+      state.completedAt = timestampSeconds(payload.completed_at, timestamp);
+      continue;
+    }
+    if (/task_(?:aborted|interrupted)|turn_(?:aborted|interrupted)/.test(eventType) && turnId === state.turnId) {
+      state.status = "interrupted";
+      state.completedAt = timestamp;
+      continue;
+    }
+    if (eventType !== "item_completed" || !turnId) continue;
+    if (turnId !== state.turnId) {
+      state.turnId = turnId;
+      state.status = "inProgress";
+      state.startedAt = timestamp;
+      state.completedAt = null;
+      state.items = [];
+    }
+    const normalized = normalizeCodexRolloutItem(payload.item);
+    pushLiveItem(state, normalized, timestamp);
+  }
+  return state;
+}
+
 function codexHome() {
   return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
 
-function historyDatabasePath() {
-  return join(codexHome(), "thread_history_1.sqlite");
+function logsDatabasePath() {
+  return join(codexHome(), "logs_2.sqlite");
+}
+
+function agentLoopExitTimes() {
+  const database = tryOpenReadOnly(logsDatabasePath());
+  if (!database) return new Map<string, number>();
+  try {
+    const rows = queryAll<AgentLoopExitRow>(database, `
+      SELECT thread_id, MAX(ts + (ts_nanos / 1000000000.0)) AS exited_at
+      FROM logs
+      WHERE thread_id IS NOT NULL
+        AND target = 'codex_core::session::handlers'
+        AND feedback_log_body LIKE '%Agent loop exited'
+      GROUP BY thread_id
+    `);
+    return new Map(rows.map((row) => [row.thread_id, row.exited_at]));
+  } finally {
+    database.close();
+  }
 }
 
 function stateDatabasePath() {
@@ -96,11 +290,31 @@ function sourceStamp(path: string) {
 }
 
 export function codexSourceSignature() {
-  const history = historyDatabasePath();
   const state = stateDatabasePath();
-  return [history, `${history}-wal`, state, `${state}-wal`, join(codexHome(), "session_index.jsonl")]
+  const logs = logsDatabasePath();
+  const rolloutPaths = recentRolloutThreads().map((thread) => thread.rollout_path);
+  return [state, `${state}-wal`, logs, `${logs}-wal`, join(codexHome(), "session_index.jsonl"), ...rolloutPaths]
     .map(sourceStamp)
     .join("|");
+}
+
+function recentRolloutThreads() {
+  const database = tryOpenReadOnly(stateDatabasePath());
+  if (!database) return [];
+  try {
+    return queryAll<StateThreadRow>(database, `
+      SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
+        reasoning_effort, agent_nickname, agent_role
+      FROM threads
+      WHERE archived = 0 AND rollout_path IS NOT NULL AND rollout_path != ''
+      ORDER BY updated_at_ms DESC
+      LIMIT 24
+    `);
+  } catch {
+    return [];
+  } finally {
+    database.close();
+  }
 }
 
 function threadNames() {
@@ -119,154 +333,87 @@ function threadNames() {
   return names;
 }
 
-function findRolloutFile(directory: string, thread: string): string | null {
-  let entries;
-  try {
-    entries = readdirSync(directory, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const found = findRolloutFile(path, thread);
-      if (found) return found;
-    } else if (extname(entry.name) === ".jsonl" && entry.name.includes(thread)) {
-      return path;
-    }
-  }
-  return null;
-}
-
-function readFirstLine(path: string) {
-  const descriptor = openSync(path, "r");
-  try {
-    const buffer = Buffer.alloc(64 * 1024);
-    const count = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, count).toString("utf8").split("\n", 1)[0] || "";
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function rolloutContext(thread: string) {
-  if (rolloutContexts.has(thread)) return rolloutContexts.get(thread) ?? null;
-  try {
-    const path = findRolloutFile(join(codexHome(), "sessions"), thread);
-    if (!path) throw new Error("rollout unavailable");
-    const value = parseJson(readFirstLine(path));
-    if (value.type !== "session_meta") throw new Error("rollout has no session metadata");
-    const payload = object(value.payload);
-    const context = {
-      parentThread: text(payload.session_id, text(payload.id, thread)),
-      cwd: text(payload.cwd),
-      modelProvider: text(payload.model_provider, "unknown"),
-    };
-    rolloutContexts.set(thread, context);
-    return context;
-  } catch {
-    rolloutContexts.set(thread, null);
-    return null;
-  }
-}
-
-function fallbackThreadName(database: DatabaseSync, thread: string) {
-  const row = queryOne<{ item_json: string }>(
-    database,
-    "SELECT item_json FROM thread_items WHERE thread_id = ? AND item_type = 'userMessage' ORDER BY rollout_ordinal LIMIT 1",
-    thread,
-  );
-  const item = row ? parseJson(row.item_json) : {};
-  const content = Array.isArray(item.content) ? item.content : [];
-  const firstText = content.map(object).map((part) => text(part.text)).find(Boolean);
-  const fallback = `Codex ${thread.slice(0, 8)}`;
-  const words = (firstText || fallback).split(/\s+/).filter((word) => !word.startsWith("/")).slice(0, 5);
-  return words.length ? words.join(" ") : fallback;
-}
-
 function compactToolName(command: string) {
   return (command.trim().split(/\s+/, 1)[0] || "tool").split("/").pop() || "tool";
 }
 
 function threadDisplayMeta(
-  stateDatabase: DatabaseSync | null,
-  historyDatabase: DatabaseSync,
+  stateDatabase: DatabaseSync,
   names: Map<string, string>,
-  thread: string,
+  thread: StateThreadRow,
 ): ThreadDisplayMeta {
-  let workstreamId = thread;
-  if (stateDatabase) {
-    for (let depth = 0; depth < 12; depth += 1) {
-      const edge = queryOne<{ parent_thread_id: string }>(
-        stateDatabase,
-        "SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id = ?",
-        workstreamId,
-      );
-      if (!edge?.parent_thread_id) break;
-      workstreamId = edge.parent_thread_id;
-    }
+  let workstreamId = thread.id;
+  for (let depth = 0; depth < 12; depth += 1) {
+    const edge = queryOne<{ parent_thread_id: string }>(
+      stateDatabase,
+      "SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id = ?",
+      workstreamId,
+    );
+    if (!edge?.parent_thread_id) break;
+    workstreamId = edge.parent_thread_id;
   }
 
-  const rollout = rolloutContext(thread);
-  if (workstreamId === thread && rollout?.parentThread && rollout.parentThread !== thread) {
-    workstreamId = rollout.parentThread;
-  }
-
-  const root = stateDatabase ? queryOne<{
+  const root = workstreamId === thread.id ? thread : queryOne<{
     title: string;
     cwd: string;
     model_provider: string;
     model: string | null;
     reasoning_effort: string | null;
-  }>(stateDatabase, "SELECT title, cwd, model_provider, model, reasoning_effort FROM threads WHERE id = ?", workstreamId) : undefined;
-  const agent = stateDatabase ? queryOne<{
-    agent_nickname: string | null;
-    agent_role: string | null;
-    model_provider: string;
-    model: string | null;
-    reasoning_effort: string | null;
-  }>(stateDatabase, "SELECT agent_nickname, agent_role, model_provider, model, reasoning_effort FROM threads WHERE id = ?", thread) : undefined;
+  }>(stateDatabase, "SELECT title, cwd, model_provider, model, reasoning_effort FROM threads WHERE id = ?", workstreamId);
 
-  const taskName = root?.title || names.get(workstreamId) || fallbackThreadName(historyDatabase, workstreamId);
-  const workstreamName = basename(root?.cwd || rollout?.cwd || "") || taskName;
+  const taskName = root?.title || names.get(workstreamId) || `Codex ${workstreamId.slice(0, 8)}`;
+  const workstreamName = basename(root?.cwd || thread.cwd || "") || taskName;
   return {
     workstreamId,
     workstreamName,
     taskName,
-    agentName: agent?.agent_nickname || agent?.agent_role || "Codex agent",
-    modelProvider: agent?.model_provider || root?.model_provider || rollout?.modelProvider || "unknown",
-    model: agent?.model || root?.model || "unknown model",
-    reasoningEffort: agent?.reasoning_effort || root?.reasoning_effort || "",
+    agentName: thread.agent_nickname || thread.agent_role || "Codex agent",
+    modelProvider: thread.model_provider || root?.model_provider || "unknown",
+    model: thread.model || root?.model || "unknown model",
+    reasoningEffort: thread.reasoning_effort || root?.reasoning_effort || "",
   };
 }
 
-function previousActivityDetail(database: DatabaseSync, thread: string, turn: string) {
-  const row = queryOne<{ item_type: string; item_json: string }>(database,
-    "SELECT item_type, item_json FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_type NOT IN ('reasoning', 'userMessage') ORDER BY updated_at_ordinal DESC LIMIT 1",
-    thread, turn);
-  if (!row) return undefined;
-  const item = parseJson(row.item_json);
-  if (row.item_type === "agentMessage") return text(item.text) || undefined;
-  if (row.item_type === "commandExecution") return text(item.command) || undefined;
-  if (row.item_type === "fileChange") {
-    const first = Array.isArray(item.changes) ? object(item.changes[0]) : {};
-    return text(first.path) ? `Updated ${text(first.path)}` : undefined;
+function liveRecordHasContent(record: LiveRolloutItem) {
+  const item = parseJson(record.item_json);
+  if (record.item_type === "reasoning") return Array.isArray(item.summary) && item.summary.some((value) => text(value).trim());
+  if (record.item_type === "agentMessage") return Boolean(text(item.text).trim());
+  if (record.item_type === "userMessage" || record.item_type === "contextCompaction") return false;
+  return true;
+}
+
+function selectedLiveRecords(state: LiveRolloutState) {
+  const useful = state.items.filter(liveRecordHasContent);
+  const selected = useful.slice(-5);
+  for (const type of ["agentMessage", "reasoning", "imageView"]) {
+    const record = [...useful].reverse().find((candidate) => candidate.item_type === type);
+    if (record && !selected.includes(record)) selected.push(record);
   }
-  if (row.item_type === "mcpToolCall" || row.item_type === "dynamicToolCall") {
-    const tool = text(item.tool);
-    return tool ? `Used ${(tool.split("__").pop() || tool).replaceAll("_", " ")}` : undefined;
+  const plan = [...useful].reverse().find((candidate) => /plan|todo/i.test(candidate.item_type));
+  if (plan && !selected.includes(plan)) selected.push(plan);
+  return selected.sort((left, right) => left.updated_at_ordinal - right.updated_at_ordinal);
+}
+
+function liveFallbackDetail(state: LiveRolloutState) {
+  for (const record of [...state.items].reverse()) {
+    const item = parseJson(record.item_json);
+    if (record.item_type === "agentMessage" && text(item.text)) return text(item.text);
+    if (record.item_type === "commandExecution" && text(item.command)) return text(item.command);
+    if (record.item_type === "fileChange") {
+      const first = Array.isArray(item.changes) ? object(item.changes[0]) : {};
+      if (text(first.path)) return `Updated ${text(first.path)}`;
+    }
+    if (record.item_type === "mcpToolCall" || record.item_type === "dynamicToolCall") {
+      const tool = text(item.tool);
+      if (tool) return `Used ${(tool.split("__").pop() || tool).replaceAll("_", " ")}`;
+    }
   }
-  if (row.item_type === "webSearch") return text(item.query) ? `Searched for ${text(item.query)}` : undefined;
-  if (row.item_type === "imageGeneration") return "Created a design image";
-  if (row.item_type === "imageView") return "Inspected an image";
   return undefined;
 }
 
-function lastAgentMessage(database: DatabaseSync, thread: string, turn: string) {
-  const row = queryOne<{ item_json: string }>(database,
-    "SELECT item_json FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_type = 'agentMessage' ORDER BY updated_at_ordinal DESC LIMIT 1",
-    thread, turn);
-  return row ? text(parseJson(row.item_json).text) || undefined : undefined;
+function liveLastMessage(state: LiveRolloutState) {
+  const record = [...state.items].reverse().find((candidate) => candidate.item_type === "agentMessage");
+  return record ? text(parseJson(record.item_json).text) || undefined : undefined;
 }
 
 function recordEvent(
@@ -446,106 +593,69 @@ function recordEvent(
 }
 
 export function codexDesktopSnapshot() {
-  const database = openReadOnly(historyDatabasePath());
-  try {
-    const active = queryOne<{ thread_id: string; turn_id: string }>(database,
-      "SELECT t.thread_id, t.turn_id FROM thread_turns t WHERE t.status = 'inProgress' ORDER BY COALESCE((SELECT MAX(i.created_at_ms) FROM thread_items i WHERE i.thread_id = t.thread_id AND i.turn_id = t.turn_id), t.started_at * 1000) DESC LIMIT 1");
-    if (!active) throw new Error("No active Codex desktop task");
-    return {
-      version: 1,
-      id: `codex-desktop-snapshot-${active.turn_id}-${Date.now()}`,
-      timestamp: "",
-      kind: "turn.start",
-      status: "thinking",
-      label: "THINKING",
-      detail: "Following active Codex desktop task",
-    };
-  } finally {
-    database.close();
-  }
+  const active = [...codexDesktopSessions()].reverse()
+    .find((event) => event.status !== "complete" && event.status !== "error");
+  if (!active) throw new Error("No active Codex desktop task");
+  return active;
 }
 
 export function codexDesktopSessions() {
-  if (!existsSync(historyDatabasePath())) return [];
-  const historyDatabase = openReadOnly(historyDatabasePath());
-  const stateDatabase = tryOpenReadOnly(stateDatabasePath());
+  if (!existsSync(stateDatabasePath())) return [];
+  const stateDatabase = openReadOnly(stateDatabasePath());
   try {
+    const loopExitTimes = agentLoopExitTimes();
     const names = threadNames();
-    const turns = queryAll<TurnRow>(historyDatabase, `
-      WITH eligible AS (
-        SELECT t.*, ROW_NUMBER() OVER (
-          PARTITION BY t.thread_id
-          ORDER BY COALESCE(t.started_at, 0) DESC, t.rollout_ordinal DESC
-        ) AS recency_rank
-        FROM thread_turns t
-        WHERE t.status IN ('inProgress', 'completed', 'interrupted')
-      )
-      SELECT t.thread_id, t.turn_id, t.status,
-        COALESCE(MAX(i.updated_at_ordinal), 0) AS latest,
-        COALESCE(t.started_at, unixepoch()) AS started_at,
-        t.completed_at
-      FROM eligible t
-      LEFT JOIN thread_items i ON i.thread_id = t.thread_id AND i.turn_id = t.turn_id
-      WHERE t.recency_rank = 1
-      GROUP BY t.thread_id, t.turn_id
-      ORDER BY COALESCE(MAX(i.created_at_ms), t.started_at * 1000) DESC
+    const rolloutThreads = queryAll<StateThreadRow>(stateDatabase, `
+      SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
+        reasoning_effort, agent_nickname, agent_role
+      FROM threads
+      WHERE archived = 0 AND rollout_path IS NOT NULL AND rollout_path != ''
+      ORDER BY updated_at_ms DESC
       LIMIT 24
     `);
     const events: JsonObject[] = [];
-    for (const turn of turns) {
-      const display = threadDisplayMeta(stateDatabase, historyDatabase, names, turn.thread_id);
-      const fallbackDetail = previousActivityDetail(historyDatabase, turn.thread_id, turn.turn_id);
-      const lastMessage = lastAgentMessage(historyDatabase, turn.thread_id, turn.turn_id);
-      const records = queryAll<ItemRow>(historyDatabase,
-        "SELECT item_type, item_json, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? ORDER BY updated_at_ordinal DESC LIMIT 5",
-        turn.thread_id, turn.turn_id);
-      const latestImage = queryOne<ItemRow>(historyDatabase,
-        "SELECT item_type, item_json, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_type = 'imageView' ORDER BY updated_at_ordinal DESC LIMIT 1",
-        turn.thread_id, turn.turn_id);
-      if (latestImage && !records.some((record) => record.updated_at_ordinal === latestImage.updated_at_ordinal)) records.push(latestImage);
-      const latestPlan = queryOne<ItemRow>(historyDatabase,
-        "SELECT item_type, item_json, updated_at_ordinal FROM thread_items WHERE thread_id = ? AND turn_id = ? AND (lower(item_type) LIKE '%plan%' OR lower(item_type) LIKE '%todo%') ORDER BY updated_at_ordinal DESC LIMIT 1",
-        turn.thread_id, turn.turn_id);
-      if (latestPlan && !records.some((record) => record.updated_at_ordinal === latestPlan.updated_at_ordinal)) records.push(latestPlan);
-      const narrativeRecords = queryAll<ItemRow>(historyDatabase, `
-        WITH ranked AS (
-          SELECT item_type, item_json, updated_at_ordinal,
-            ROW_NUMBER() OVER (PARTITION BY item_type ORDER BY updated_at_ordinal DESC) rank
-          FROM thread_items
-          WHERE thread_id = ? AND turn_id = ? AND (
-            item_type = 'agentMessage' OR
-            (item_type = 'reasoning' AND json_array_length(json_extract(item_json, '$.summary')) > 0)
-          )
-        )
-        SELECT item_type, item_json, updated_at_ordinal FROM ranked WHERE rank = 1
-      `, turn.thread_id, turn.turn_id);
-      for (const narrative of narrativeRecords) {
-        if (!records.some((record) => record.updated_at_ordinal === narrative.updated_at_ordinal)) records.push(narrative);
-      }
-      records.sort((left, right) => left.updated_at_ordinal - right.updated_at_ordinal);
-      if (!records.length) {
-        events.push(recordEvent(turn.thread_id, turn.turn_id, turn.status, "", "{}", turn.latest, display, turn.started_at, turn.completed_at, fallbackDetail, lastMessage));
-        continue;
-      }
-      records.forEach((record, index) => {
-        events.push(recordEvent(
-          turn.thread_id,
-          turn.turn_id,
-          index === records.length - 1 ? turn.status : "inProgress",
+    for (const thread of rolloutThreads) {
+      const live = updateLiveRollout(thread.rollout_path);
+      if (!live?.turnId) continue;
+      const lifecycle = reconcileCodexTurnLifecycle(
+        live.status,
+        live.startedAt,
+        live.completedAt,
+        loopExitTimes.get(thread.id),
+      );
+      const display = threadDisplayMeta(stateDatabase, names, thread);
+      const records = selectedLiveRecords(live);
+      const fallbackDetail = liveFallbackDetail(live);
+      const lastMessage = liveLastMessage(live);
+      const liveEvents = records.length ? records.map((record, index) => recordEvent(
+          thread.id,
+          live.turnId,
+          index === records.length - 1 ? lifecycle.status : "inProgress",
           record.item_type,
           record.item_json,
           record.updated_at_ordinal,
           display,
-          turn.started_at,
-          turn.completed_at,
+          live.startedAt,
+          lifecycle.completedAt,
           fallbackDetail,
           lastMessage,
-        ));
-      });
+        )) : [recordEvent(
+          thread.id,
+          live.turnId,
+          lifecycle.status,
+          "",
+          "{}",
+          live.nextOrdinal,
+          display,
+          live.startedAt,
+          lifecycle.completedAt,
+          fallbackDetail,
+          lastMessage,
+        )];
+      events.push(...liveEvents);
     }
     return events;
   } finally {
-    stateDatabase?.close();
-    historyDatabase.close();
+    stateDatabase.close();
   }
 }
