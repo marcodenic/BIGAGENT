@@ -11,6 +11,11 @@ import {
   mergeWindsurfHookSettings,
   observationBridgeCommand,
   openCodePluginSource,
+  removeCopilotHookSettings,
+  removeCursorHookSettings,
+  removeGeminiHookSettings,
+  removeGrokHookSettings,
+  removeWindsurfHookSettings,
   windsurfHooksConfigured,
 } from "./structured-hooks";
 
@@ -27,6 +32,7 @@ describe("official structured provider setup", () => {
     expect((configured.hooks as Record<string, unknown[]>).afterAgentResponse).toHaveLength(1);
     expect(cursorHooksConfigured(configured)).toBe(true);
     expect(mergeCursorHookSettings(configured, bridge.replace("provider", "cursor"))).toEqual(configured);
+    expect(removeCursorHookSettings(configured)).toEqual({ ...original, version: 1 });
   });
 
   it("replaces stale BIG AGENT hook commands without touching user hooks", () => {
@@ -50,6 +56,7 @@ describe("official structured provider setup", () => {
     expect((configured.hooks as Record<string, unknown[]>).BeforeTool[0]).toEqual(original.hooks.BeforeTool[0]);
     expect(geminiHooksConfigured(configured)).toBe(true);
     expect(mergeGeminiHookSettings(configured, command)).toEqual(configured);
+    expect(removeGeminiHookSettings(configured)).toEqual(original);
   });
 
   it("preserves Copilot hooks and installs fail-open commands idempotently", () => {
@@ -61,6 +68,7 @@ describe("official structured provider setup", () => {
     expect(copilotHooksConfigured(configured)).toBe(true);
     expect(JSON.stringify(configured)).toContain("|| true");
     expect(mergeCopilotHookSettings(configured, command)).toEqual(configured);
+    expect(removeCopilotHookSettings(configured)).toEqual({ ...original, version: 1 });
   });
 
   it("installs Grok HTTP lifecycle hooks plus its authoritative idle backstop", () => {
@@ -72,6 +80,7 @@ describe("official structured provider setup", () => {
     expect(notification).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: "idle_prompt" })]));
     expect(grokHooksConfigured(configured)).toBe(true);
     expect(mergeGrokHookSettings(configured)).toEqual(configured);
+    expect(removeGrokHookSettings(configured)).toEqual(original);
   });
 
   it("preserves Windsurf hooks without enabling transcript capture", () => {
@@ -83,6 +92,7 @@ describe("official structured provider setup", () => {
     expect(windsurfHooksConfigured(configured)).toBe(true);
     expect(JSON.stringify(configured)).not.toContain("include_transcript");
     expect(mergeWindsurfHookSettings(configured, command)).toEqual(configured);
+    expect(removeWindsurfHookSettings(configured)).toEqual(original);
   });
 
   it("uses a bounded fail-open bridge and OpenCode global event plugin", () => {

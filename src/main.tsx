@@ -566,7 +566,7 @@ function ProviderDiscovery({ providers, busy, onboarding, onAction, onContinue }
           <p>{provider.detail}</p>
           {provider.actions.length > 0 && <div className="provider-actions">{provider.actions.map((action) => {
             const key = `${provider.id}:${action.id}`;
-            return <button key={action.id} disabled={busy === key} onClick={() => onAction(provider.id, action.id)}>{busy === key ? "WORKING…" : action.label}</button>;
+            return <button key={action.id} className={action.id === "remove" ? "is-remove" : undefined} disabled={busy === key} onClick={() => onAction(provider.id, action.id)}>{busy === key ? "WORKING…" : action.label}</button>;
           })}</div>}
         </article>;
       })}
@@ -685,6 +685,7 @@ function App() {
   const providerAction = (provider: ProviderHealth["id"], action: ProviderAction["id"]) => {
     const desktop = desktopApi();
     if (!desktop) return;
+    if (action === "remove" && !window.confirm("Remove BIG AGENT's observation integration for this provider? Your other hooks and settings will be preserved.")) return;
     const key = `${provider}:${action}`;
     setProviderBusy(key);
     setSyncError("");

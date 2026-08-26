@@ -4,5 +4,6 @@ out/
 release/
 src-tauri/target/
 *.tsbuildinfo
+*.mp4
 vite.config.js
 vite.config.d.ts

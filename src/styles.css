@@ -799,6 +799,8 @@ header button.agents-toggle { opacity: 1; }
 .provider-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
 .provider-actions button { padding: 6px 9px; border: 1px solid #3b3e36; color: #b8bbb0; font: 500 clamp(8px, .58vw, 9px) "Geist Mono Variable", monospace; letter-spacing: .08em; }
 .provider-actions button:hover { border-color: var(--active); color: #efeee9; }
+.provider-actions button.is-remove { color: #9b817d; }
+.provider-actions button.is-remove:hover { border-color: #d14b5a; color: #ef8993; }
 .provider-actions button:disabled { opacity: .45; cursor: wait; }
 .provider-discovery-result { display: flex; flex-direction: column; align-items: center; margin-top: clamp(14px, 2vh, 22px); }
 .provider-ready-face { width: clamp(72px, 7vw, 104px); margin: 0; }

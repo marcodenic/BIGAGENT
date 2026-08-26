@@ -80,8 +80,27 @@ export function mergeClaudeHookSettings(settings: unknown, url = CLAUDE_HOOK_URL
     if (!Array.isArray(root.allowedHttpHookUrls)) throw new Error("Claude allowedHttpHookUrls must be an array");
     const allowlist = root.allowedHttpHookUrls.filter((value): value is string => typeof value === "string");
     if (!allowlist.some((value) => value === CLAUDE_HOOK_URL || value === "http://127.0.0.1:*" || value === "http://localhost:*")) {
-      root.allowedHttpHookUrls = [...allowlist, "http://127.0.0.1:*"];
+      root.allowedHttpHookUrls = [...allowlist, CLAUDE_HOOK_URL];
     }
+  }
+  return root;
+}
+
+export function removeClaudeHookSettings(settings: unknown, url = CLAUDE_HOOK_URL) {
+  const root: Json = { ...object(settings) };
+  const hooks = { ...object(root.hooks) };
+  for (const event of CLAUDE_HOOK_EVENTS) {
+    const current = hooks[event];
+    if (current === undefined) continue;
+    if (!Array.isArray(current)) throw new Error(`Claude hooks.${event} must be an array`);
+    const retained = current.filter((entry) => !containsBigAgentHook(entry, url));
+    if (retained.length) hooks[event] = retained;
+    else delete hooks[event];
+  }
+  if (Object.keys(hooks).length) root.hooks = hooks;
+  else delete root.hooks;
+  if (Array.isArray(root.allowedHttpHookUrls)) {
+    root.allowedHttpHookUrls = root.allowedHttpHookUrls.filter((value) => value !== url);
   }
   return root;
 }
@@ -241,6 +260,7 @@ export class ClaudeProvider {
     if (this.binary) {
       actions.push({ id: "launch", label: "OPEN CLAUDE" });
     }
+    if (this.configured) actions.push({ id: "remove", label: "REMOVE INTEGRATION" });
     return {
       id: "claude",
       label: "CLAUDE",
@@ -259,7 +279,7 @@ export class ClaudeProvider {
   async start() {
     this.stopped = false;
     this.lastError = undefined;
-    this.configured = await this.installHooks().catch((error) => {
+    this.configured = await this.hooksConfigured().catch((error) => {
       this.lastError = error instanceof Error ? error.message : String(error);
       return false;
     });
@@ -289,35 +309,58 @@ export class ClaudeProvider {
     this.publishHealth();
   }
 
-  async action(action: "setup" | "retry" | "launch") {
+  async action(action: "setup" | "retry" | "launch" | "remove") {
     if (action === "setup") {
       this.configured = await this.installHooks();
       this.publishHealth();
       return;
     }
     if (action === "retry") {
+      this.configured = await this.hooksConfigured();
       this.binary = await findExecutable("claude", [process.env.CLAUDE_CLI_PATH]);
       if (this.binary) await this.reconcile();
+      this.publishHealth();
+      return;
+    }
+    if (action === "remove") {
+      await this.uninstallHooks();
+      this.configured = false;
+      this.lastEventAt = undefined;
       this.publishHealth();
       return;
     }
     await this.launch();
   }
 
-  private async installHooks() {
+  private async readSettings() {
     const configRoot = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
     const settingsPath = join(configRoot, "settings.json");
-    let settings: unknown = {};
     try {
       const contents = await readFile(settingsPath, "utf8");
-      settings = contents.trim() ? JSON.parse(contents) : {};
+      return { settingsPath, settings: contents.trim() ? JSON.parse(contents) as unknown : {} };
     } catch (error) {
       const code = object(error).code;
       if (code !== "ENOENT") throw error;
+      return { settingsPath, settings: {} as unknown };
     }
+  }
+
+  private async hooksConfigured() {
+    const { settings } = await this.readSettings();
+    return claudeHooksConfigured(settings);
+  }
+
+  private async installHooks() {
+    const { settingsPath, settings } = await this.readSettings();
     const merged = mergeClaudeHookSettings(settings);
     if (!claudeHooksConfigured(settings)) await writeAtomic(settingsPath, merged);
     return claudeHooksConfigured(merged);
+  }
+
+  private async uninstallHooks() {
+    const { settingsPath, settings } = await this.readSettings();
+    const restored = removeClaudeHookSettings(settings);
+    if (JSON.stringify(restored) !== JSON.stringify(settings)) await writeAtomic(settingsPath, restored);
   }
 
   private async reconcile() {

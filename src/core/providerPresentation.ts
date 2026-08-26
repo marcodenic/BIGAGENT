@@ -1,4 +1,4 @@
-export type ProviderAction = { id: "setup" | "retry" | "launch"; label: string };
+export type ProviderAction = { id: "setup" | "retry" | "launch" | "remove"; label: string };
 export type ProviderState = "connecting" | "ready" | "needs-restart" | "needs-setup" | "unavailable" | "error";
 
 export type ProviderHealth = {

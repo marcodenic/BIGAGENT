@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { findExecutable } from "./executables";
 import type { ProviderHealth, ProviderHealthListener, ProviderId } from "./types";
 
@@ -18,6 +18,7 @@ type HookProviderSpec = {
   restartAfterSetup: boolean;
   inspect(command: string): Promise<boolean>;
   install(command: string): Promise<boolean>;
+  uninstall(command: string): Promise<void>;
 };
 
 const CURSOR_EVENTS = [
@@ -113,6 +114,22 @@ function everyEventConfigured(settings: unknown, events: readonly string[], conf
   return events.every((event) => Array.isArray(hooks[event]) && (hooks[event] as unknown[]).some(configured));
 }
 
+function removeEventEntries(settings: unknown, events: readonly string[], managed: (value: unknown) => boolean): Json {
+  const root: Json = { ...object(settings) };
+  const hooks = { ...object(root.hooks) };
+  for (const event of events) {
+    const current = hooks[event];
+    if (current === undefined) continue;
+    if (!Array.isArray(current)) throw new Error(`hooks.${event} must be an array`);
+    const retained = current.filter((value) => !managed(value));
+    if (retained.length) hooks[event] = retained;
+    else delete hooks[event];
+  }
+  if (Object.keys(hooks).length) root.hooks = hooks;
+  else delete root.hooks;
+  return root;
+}
+
 export function mergeCursorHookSettings(settings: unknown, command: string): Json {
   const merged = replaceManagedEventArrays(settings, CURSOR_EVENTS, () => ({ command }), (value) => containsCursorCommand(value));
   return { ...merged, version: typeof object(settings).version === "number" ? object(settings).version : 1 };
@@ -120,6 +137,10 @@ export function mergeCursorHookSettings(settings: unknown, command: string): Jso
 
 export function cursorHooksConfigured(settings: unknown, command?: string) {
   return everyEventConfigured(settings, CURSOR_EVENTS, (value) => containsCursorCommand(value, "cursor", command));
+}
+
+export function removeCursorHookSettings(settings: unknown) {
+  return removeEventEntries(settings, CURSOR_EVENTS, (value) => containsCursorCommand(value));
 }
 
 export function mergeGeminiHookSettings(settings: unknown, command: string): Json {
@@ -132,6 +153,10 @@ export function geminiHooksConfigured(settings: unknown, command?: string) {
   return everyEventConfigured(settings, GEMINI_EVENTS, (value) => containsNestedCommand(value, "gemini", command));
 }
 
+export function removeGeminiHookSettings(settings: unknown) {
+  return removeEventEntries(settings, GEMINI_EVENTS, (value) => containsNestedCommand(value, "gemini"));
+}
+
 export function mergeCopilotHookSettings(settings: unknown, command: string): Json {
   const merged = replaceManagedEventArrays(settings, COPILOT_EVENTS, () => ({ type: "command", command, timeoutSec: 2 }), (value) => containsCopilotCommand(value));
   return { ...merged, version: typeof object(settings).version === "number" ? object(settings).version : 1 };
@@ -139,6 +164,10 @@ export function mergeCopilotHookSettings(settings: unknown, command: string): Js
 
 export function copilotHooksConfigured(settings: unknown, command?: string) {
   return everyEventConfigured(settings, COPILOT_EVENTS, (value) => containsCopilotCommand(value, command));
+}
+
+export function removeCopilotHookSettings(settings: unknown) {
+  return removeEventEntries(settings, COPILOT_EVENTS, containsCopilotCommand);
 }
 
 export function mergeGrokHookSettings(settings: unknown): Json {
@@ -159,12 +188,31 @@ export function grokHooksConfigured(settings: unknown) {
     && (hooks.Notification as unknown[]).some((entry) => object(entry).matcher === "idle_prompt" && containsGrokHttp(entry));
 }
 
+export function removeGrokHookSettings(settings: unknown) {
+  const withoutEvents = removeEventEntries(settings, GROK_EVENTS, containsGrokHttp);
+  const root: Json = { ...withoutEvents };
+  const hooks = { ...object(root.hooks) };
+  const notifications = hooks.Notification;
+  if (Array.isArray(notifications)) {
+    const retained = notifications.filter((entry) => !(object(entry).matcher === "idle_prompt" && containsGrokHttp(entry)));
+    if (retained.length) hooks.Notification = retained;
+    else delete hooks.Notification;
+  }
+  if (Object.keys(hooks).length) root.hooks = hooks;
+  else delete root.hooks;
+  return root;
+}
+
 export function mergeWindsurfHookSettings(settings: unknown, command: string): Json {
   return replaceManagedEventArrays(settings, WINDSURF_EVENTS, () => ({ command, show_output: false }), (value) => containsCursorCommand(value, "windsurf"));
 }
 
 export function windsurfHooksConfigured(settings: unknown, command?: string) {
   return everyEventConfigured(settings, WINDSURF_EVENTS, (value) => containsCursorCommand(value, "windsurf", command));
+}
+
+export function removeWindsurfHookSettings(settings: unknown) {
+  return removeEventEntries(settings, WINDSURF_EVENTS, (value) => containsCursorCommand(value, "windsurf"));
 }
 
 export function openCodePluginSource() {
@@ -194,7 +242,12 @@ async function writeJson(path: string, value: unknown) {
   await writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function jsonSetup(path: string, configured: (value: unknown, command?: string) => boolean, merge: (value: unknown, command: string) => unknown) {
+function jsonSetup(
+  path: string,
+  configured: (value: unknown, command?: string) => boolean,
+  merge: (value: unknown, command: string) => unknown,
+  remove: (value: unknown, command: string) => unknown,
+) {
   return {
     inspect: async (command: string) => configured(await readJson(path), command),
     install: async (command: string) => {
@@ -202,6 +255,13 @@ function jsonSetup(path: string, configured: (value: unknown, command?: string) 
       const next = merge(settings, command);
       if (!configured(settings, command)) await writeJson(path, next);
       return configured(next, command);
+    },
+    uninstall: async (command: string) => {
+      const contents = await readText(path);
+      if (!contents?.trim()) return;
+      const settings = JSON.parse(contents) as unknown;
+      const next = remove(settings, command);
+      if (JSON.stringify(next) !== JSON.stringify(settings)) await writeJson(path, next);
     },
   };
 }
@@ -297,6 +357,7 @@ export class StructuredHookProvider {
     if (installed && !this.configured && !observed) actions.push({ id: "setup", label: this.spec.setupLabel });
     else actions.push({ id: "retry", label: "RECHECK" });
     if (this.binary) actions.push({ id: "launch", label: this.spec.launchLabel });
+    if (this.configured) actions.push({ id: "remove", label: "REMOVE INTEGRATION" });
     return {
       id: this.spec.id,
       label: this.spec.label,
@@ -330,7 +391,7 @@ export class StructuredHookProvider {
     this.publish();
   }
 
-  async action(action: "setup" | "retry" | "launch") {
+  async action(action: "setup" | "retry" | "launch" | "remove") {
     if (action === "setup") {
       try {
         this.configured = await this.spec.install(this.bridgeCommand);
@@ -344,6 +405,19 @@ export class StructuredHookProvider {
     }
     if (action === "retry") {
       await this.refresh();
+      return;
+    }
+    if (action === "remove") {
+      try {
+        await this.spec.uninstall(this.bridgeCommand);
+        this.configured = false;
+        this.justConfigured = false;
+        this.lastEventAt = undefined;
+        this.lastError = undefined;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+      }
+      this.publish();
       return;
     }
     if (!this.binary) throw new Error(`${this.spec.label} was not found`);
@@ -381,37 +455,41 @@ export function createStructuredHookProviders(executable: string, bridgeScript: 
       if ((await readText(openCodePath)) !== openCodePluginSource()) await writeAtomic(openCodePath, openCodePluginSource());
       return true;
     },
+    uninstall: async (_command: string) => {
+      const source = await readText(openCodePath);
+      if (source?.includes("BIG AGENT passive local telemetry")) await rm(openCodePath, { force: true });
+    },
   };
   const specs: HookProviderSpec[] = [
     {
       id: "grok", label: "GROK BUILD", transport: "HTTP LIFECYCLE HOOKS", executableNames: ["grok"],
       executableCandidates: [process.env.GROK_CLI_PATH, join(home, ".local", "bin", "grok"), join(home, ".grok", "bin", "grok")],
       setupLabel: "SET UP GROK", launchLabel: "OPEN GROK", restartAfterSetup: true,
-      ...jsonSetup(grokPath, grokHooksConfigured, (value) => mergeGrokHookSettings(value)),
+      ...jsonSetup(grokPath, grokHooksConfigured, (value) => mergeGrokHookSettings(value), (value) => removeGrokHookSettings(value)),
     },
     {
       id: "cursor", label: "CURSOR", transport: "THOUGHT + LIFECYCLE HOOKS", executableNames: ["cursor"],
       executableCandidates: [process.env.CURSOR_PATH, "/usr/bin/cursor", "/usr/local/bin/cursor", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"],
       setupLabel: "SET UP CURSOR", launchLabel: "OPEN CURSOR", restartAfterSetup: false,
-      ...jsonSetup(cursorPath, cursorHooksConfigured, mergeCursorHookSettings),
+      ...jsonSetup(cursorPath, cursorHooksConfigured, mergeCursorHookSettings, (value) => removeCursorHookSettings(value)),
     },
     {
       id: "gemini", label: "GEMINI CLI", transport: "LIFECYCLE HOOKS + OTEL", executableNames: ["gemini"],
       executableCandidates: [process.env.GEMINI_CLI_PATH, join(home, ".local", "bin", "gemini")],
       setupLabel: "SET UP GEMINI", launchLabel: "OPEN GEMINI", restartAfterSetup: true,
-      ...jsonSetup(geminiPath, geminiHooksConfigured, mergeGeminiHookSettings),
+      ...jsonSetup(geminiPath, geminiHooksConfigured, mergeGeminiHookSettings, (value) => removeGeminiHookSettings(value)),
     },
     {
       id: "copilot", label: "COPILOT CLI", transport: "OFFICIAL LIFECYCLE HOOKS", executableNames: ["copilot"],
       executableCandidates: [process.env.COPILOT_CLI_PATH, join(home, ".local", "bin", "copilot")],
       setupLabel: "SET UP COPILOT", launchLabel: "OPEN COPILOT", restartAfterSetup: true,
-      ...jsonSetup(copilotPath, copilotHooksConfigured, mergeCopilotHookSettings),
+      ...jsonSetup(copilotPath, copilotHooksConfigured, mergeCopilotHookSettings, (value) => removeCopilotHookSettings(value)),
     },
     {
       id: "windsurf", label: "WINDSURF", transport: "CASCADE LIFECYCLE HOOKS", executableNames: ["windsurf"],
       executableCandidates: [process.env.WINDSURF_PATH, "/usr/bin/windsurf", "/usr/local/bin/windsurf", "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf"],
       setupLabel: "SET UP WINDSURF", launchLabel: "OPEN WINDSURF", restartAfterSetup: true,
-      ...jsonSetup(windsurfPath, windsurfHooksConfigured, mergeWindsurfHookSettings),
+      ...jsonSetup(windsurfPath, windsurfHooksConfigured, mergeWindsurfHookSettings, (value) => removeWindsurfHookSettings(value)),
     },
     {
       id: "opencode", label: "OPENCODE", transport: "GLOBAL PLUGIN + SSE", executableNames: ["opencode"],

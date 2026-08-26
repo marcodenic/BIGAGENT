@@ -87,6 +87,15 @@ export function sharedCodexDesktopEntry(contents: string) {
   return `${lines.join("\n")}\n`;
 }
 
+export function unsharedCodexDesktopEntry(contents: string) {
+  const lines = contents.trimEnd().split("\n")
+    .filter((line) => line !== DESKTOP_MARKER)
+    .map((line) => line.startsWith("Exec=/usr/bin/env CODEX_APP_SERVER_USE_LOCAL_DAEMON=1 ")
+      ? `Exec=${line.slice("Exec=/usr/bin/env CODEX_APP_SERVER_USE_LOCAL_DAEMON=1 ".length)}`
+      : line);
+  return `${lines.join("\n")}\n`;
+}
+
 async function writeAtomic(path: string, contents: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.bigagent-${process.pid}`;
@@ -172,6 +181,8 @@ export class CodexAppServerProvider {
       ? "unavailable"
       : this.standaloneMissing
         ? "needs-setup"
+      : !this.configured && canLaunch
+        ? "needs-setup"
       : this.lastError && !this.connected
         ? "error"
         : !this.connected
@@ -183,6 +194,8 @@ export class CodexAppServerProvider {
       ? "Codex CLI was not found"
       : this.standaloneMissing
         ? "The official standalone Codex CLI is required for the shared daemon"
+      : !this.configured && canLaunch
+        ? "App Server available · set up Codex Desktop to join the shared feed"
       : this.lastError && !this.connected
         ? this.lastError
         : this.connected && this.desktopRunning && !this.desktopShared
@@ -197,6 +210,7 @@ export class CodexAppServerProvider {
     else if (!this.configured && canLaunch) actions.push({ id: "setup", label: "SET UP CODEX" });
     if (this.binary && !this.connected && !this.standaloneMissing) actions.push({ id: "retry", label: "RETRY" });
     if (this.binary && canLaunch && !this.standaloneMissing) actions.push({ id: "launch", label: this.desktopRunning && !this.desktopShared ? "RESTART CODEX" : "OPEN CODEX" });
+    if (this.configured && canLaunch) actions.push({ id: "remove", label: "REMOVE INTEGRATION" });
     return {
       id: "codex",
       label: "CODEX",
@@ -224,7 +238,7 @@ export class CodexAppServerProvider {
       process.platform === "linux" ? "/usr/lib/chatgpt/resources/codex" : undefined,
       process.platform === "darwin" ? "/Applications/Codex.app/Contents/Resources/codex" : undefined,
     ]);
-    this.configured = await this.configureDesktopLauncher().catch(() => false);
+    this.configured = await this.desktopLauncherConfigured().catch(() => false);
     this.publishHealth();
     if (!this.binary) {
       this.starting = false;
@@ -245,7 +259,7 @@ export class CodexAppServerProvider {
     }
   }
 
-  async action(action: "setup" | "retry" | "launch") {
+  async action(action: "setup" | "retry" | "launch" | "remove") {
     if (action === "setup") {
       if (this.standaloneMissing) {
         await installStandaloneCodex();
@@ -261,6 +275,12 @@ export class CodexAppServerProvider {
     if (action === "retry") {
       this.disconnect();
       await this.start();
+      return;
+    }
+    if (action === "remove") {
+      await this.removeDesktopLauncher();
+      this.configured = false;
+      this.publishHealth();
       return;
     }
     await this.launchDesktop();
@@ -284,9 +304,24 @@ export class CodexAppServerProvider {
     return configured.includes(DESKTOP_MARKER) && configured.includes("CODEX_APP_SERVER_USE_LOCAL_DAEMON=1");
   }
 
+  private async desktopLauncherConfigured() {
+    if (process.platform !== "linux") return true;
+    const localPath = join(homedir(), ".local", "share", "applications", "chatgpt.desktop");
+    const contents = await readFile(localPath, "utf8").catch(() => "");
+    return contents.includes(DESKTOP_MARKER) && contents.includes("CODEX_APP_SERVER_USE_LOCAL_DAEMON=1");
+  }
+
+  private async removeDesktopLauncher() {
+    if (process.platform !== "linux") return;
+    const localPath = join(homedir(), ".local", "share", "applications", "chatgpt.desktop");
+    const contents = await readFile(localPath, "utf8").catch(() => "");
+    if (!contents) return;
+    const restored = unsharedCodexDesktopEntry(contents);
+    if (restored !== contents) await writeAtomic(localPath, restored);
+  }
+
   private async launchDesktop() {
     if (!this.binary) throw new Error("Codex CLI was not found");
-    this.configured = await this.configureDesktopLauncher();
     await run(this.binary, ["app-server", "daemon", "start"]);
     const processes = await linuxDesktopProcesses();
     for (const processInfo of processes.filter((entry) => !entry.shared)) {

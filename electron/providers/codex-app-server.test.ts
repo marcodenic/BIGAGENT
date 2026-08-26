@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sharedCodexDesktopEntry, unixSocketPeerInodes } from "./codex-app-server";
+import { sharedCodexDesktopEntry, unixSocketPeerInodes, unsharedCodexDesktopEntry } from "./codex-app-server";
 
 describe("Codex shared App Server desktop setup", () => {
   it("adds the daemon environment without discarding desktop metadata", () => {
@@ -9,6 +9,7 @@ describe("Codex shared App Server desktop setup", () => {
     expect(configured).toContain("Icon=chatgpt");
     expect(configured).toContain("X-BIGAGENT-Shared-App-Server=true");
     expect(sharedCodexDesktopEntry(configured)).toBe(configured);
+    expect(unsharedCodexDesktopEntry(configured)).toBe(original);
   });
 
   it("recognizes the desktop peer attached to the shared daemon socket", () => {

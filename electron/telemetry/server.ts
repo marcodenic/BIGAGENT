@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { TelemetryHub } from "./hub";
 import type { TelemetryEnvelope, TelemetryFormat } from "./normalizers";
 
-const MAX_BODY_BYTES = 16 * 1024 * 1024;
+export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 function json(response: ServerResponse, status: number, value: unknown) {
   response.writeHead(status, {
@@ -37,6 +37,22 @@ function sourceFormat(product: string): TelemetryFormat {
   return "protocol";
 }
 
+export function trustedTelemetryOrigin(origin: string | undefined) {
+  if (!origin) return true;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:"
+      && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
+  } catch {
+    return false;
+  }
+}
+
+function jsonContentType(value: string | undefined) {
+  const type = value?.split(";", 1)[0].trim().toLowerCase();
+  return type === "application/json" || Boolean(type?.startsWith("application/") && type.endsWith("+json"));
+}
+
 function ingestMany(hub: TelemetryHub, envelope: Omit<TelemetryEnvelope, "payload">, payload: unknown) {
   const values = Array.isArray(payload) ? payload : [payload];
   return values.flatMap((value) => hub.ingest({ ...envelope, payload: value }));
@@ -53,11 +69,24 @@ export function createTelemetryServer(hub: TelemetryHub) {
       json(response, 404, { status: "not found" });
       return;
     }
+    if (!trustedTelemetryOrigin(request.headers.origin)) {
+      json(response, 403, { status: "forbidden", detail: "Cross-origin telemetry is not accepted" });
+      return;
+    }
+    const declaredLength = Number(request.headers["content-length"] ?? 0);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      json(response, 413, { status: "invalid request", detail: "request body is too large" });
+      return;
+    }
     if (request.headers["content-type"]?.includes("application/x-protobuf")) {
       json(response, 415, {
         status: "unsupported encoding",
         detail: "Send OTLP using http/json, or place the OpenTelemetry Collector in front of BIG AGENT for OTLP protobuf/gRPC.",
       });
+      return;
+    }
+    if (!jsonContentType(request.headers["content-type"])) {
+      json(response, 415, { status: "unsupported encoding", detail: "Send telemetry as JSON" });
       return;
     }
     try {

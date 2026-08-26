@@ -16,11 +16,11 @@ The telemetry hub keeps the original source, product, transport and provider eve
 
 BIG AGENT connects as a read-only client to the official local Codex App Server daemon over its Unix WebSocket. It initializes the protocol, polls `thread/loaded/list`, subscribes with `thread/resume`, and consumes thread, turn, item, reasoning-summary, message, approval, and input notifications. It observes server requests but never answers them.
 
-Codex Desktop must use the same daemon for passive monitoring. On Linux BIG AGENT writes a per-user desktop entry with `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`; the ready screen identifies an already-running private instance and offers a one-time restart. The rollout/database reader is disabled unless `BIG_AGENT_CODEX_FALLBACK=1` is explicitly set. Historical BIG AGENT Codex command hooks are removed only after an App Server connection succeeds, while unrelated hooks are preserved.
+Codex Desktop must use the same daemon for passive monitoring. On Linux the explicit **SET UP CODEX** action writes a per-user desktop entry with `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`; ordinary startup only inspects it. **REMOVE INTEGRATION** reverses BIG AGENT's desktop-entry changes. The ready screen identifies an already-running private instance and offers a one-time restart. The rollout/database reader is disabled unless `BIG_AGENT_CODEX_FALLBACK=1` is explicitly set. Historical BIG AGENT Codex command hooks are removed only after an App Server connection succeeds, while unrelated hooks are preserved.
 
 ### Claude Code
 
-BIG AGENT installs official HTTP observation hooks for session, prompt, message, tool, permission, subagent, task, stop, and compaction events. It preserves existing Claude settings and hook actions. The localhost receiver always returns an empty `204`, the documented neutral result, so BIG AGENT cannot affect Claude's behavior. `claude agents --json` supplies an authoritative active-session registry; `--all` is consulted to classify agents that leave the active list.
+The explicit **SET UP CLAUDE** action installs official HTTP observation hooks for session, prompt, message, tool, permission, subagent, task, stop, and compaction events. Ordinary startup only inspects the configuration, and **REMOVE INTEGRATION** removes BIG AGENT's entries. Existing Claude settings and hook actions are preserved. The localhost receiver always returns an empty `204`, the documented neutral result, so BIG AGENT cannot affect Claude's behavior. `claude agents --json` supplies an authoritative active-session registry; `--all` is consulted to classify agents that leave the active list.
 
 ### Grok Build
 
@@ -46,11 +46,13 @@ BIG AGENT merges official Cascade hooks into `~/.codeium/windsurf/hooks.json`. `
 
 BIG AGENT installs a global OpenCode event plugin at `~/.config/opencode/plugins/big-agent.js`. The plugin forwards the official event object to localhost without awaiting the request, so observation cannot delay the agent. The optional `/global/event` or `/event` SSE adapter remains available when OpenCode is running an addressable server; BIG AGENT does not assume that a normal in-process TUI owns port 4096.
 
-All command-hook integrations invoke a stable bridge copied into BIG AGENT's per-user application-data directory. Setup removes and replaces only older BIG AGENT hook entries, including transient AppImage paths, while leaving user hooks unchanged.
+All command-hook integrations invoke a stable bridge copied into BIG AGENT's per-user application-data directory. Setup and removal are explicit. Setup replaces only older BIG AGENT hook entries, including transient AppImage paths; removal deletes only BIG AGENT-managed entries. User hooks remain unchanged.
 
 Adapters must keep session, turn, tool, and child-agent boundaries distinct. In particular, a turn-level stop or idle notification is not a session completion. See the [lifecycle contract](lifecycle.md).
 
 ## Local endpoints
+
+The server binds only to `127.0.0.1:19777`, accepts JSON bodies up to 4 MB, and rejects non-local browser origins.
 
 | Endpoint | Input |
 |---|---|

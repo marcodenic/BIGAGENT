@@ -2,8 +2,15 @@
   "name": "big-agent",
   "private": true,
   "version": "0.1.0",
+  "desktopName": "big-agent",
   "description": "An ambient room-scale display for autonomous agents",
   "author": "BIG AGENT contributors",
+  "license": "MIT",
+  "homepage": "https://github.com/marcodenic/BIGAGENT#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcodenic/BIGAGENT.git"
+  },
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
@@ -63,6 +70,7 @@
       }
     ],
     "linux": {
+      "syncDesktopName": true,
       "target": [
         "AppImage"
       ],

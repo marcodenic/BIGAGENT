@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
 import type { Server } from "node:http";
@@ -99,42 +97,6 @@ async function imagePreview(path: string) {
   return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
-function emitProcessEvent(payload: unknown) {
-  telemetryHub.ingest({ source: "process", product: "generic", transport: "child-process", format: "protocol", payload });
-}
-
-function runProcess(command: string, args: string[]) {
-  if (!command.trim()) throw new Error("command is required");
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
-  const runId = randomUUID();
-  const meta = { sessionId: `process:${runId}`, runId, workstreamId: `process:${runId}`, agentName: "Process" };
-  let outputOrdinal = 0;
-  emitProcessEvent({
-    version: 1,
-    id: `process-${runId}-start`,
-    timestamp: "",
-    kind: "command.start",
-    status: "command",
-    command: [command, ...args].join(" "),
-    meta,
-  });
-  child.stdout.setEncoding("utf8");
-  let buffer = "";
-  child.stdout.on("data", (chunk: string) => {
-    buffer += chunk;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines.filter(Boolean)) {
-      outputOrdinal += 1;
-      emitProcessEvent({ version: 1, id: `process-${runId}-stdout-${outputOrdinal}`, timestamp: "", kind: "activity", status: "working", detail: line, meta });
-    }
-  });
-  child.on("error", (error) => emitProcessEvent({ version: 1, id: `process-${runId}-launch-error`, timestamp: "", kind: "error", status: "error", detail: error.message, meta }));
-  child.on("exit", (code) => emitProcessEvent(code === 0
-    ? { version: 1, id: `process-${runId}-complete`, timestamp: "", kind: "complete", status: "complete", detail: "Process completed", meta }
-    : { version: 1, id: `process-${runId}-error`, timestamp: "", kind: "error", status: "error", detail: `Process exited with code ${code ?? -1}`, exitCode: code, meta }));
-}
-
 function refreshSessions(force = false) {
   if (!allowCodexFallback) return;
   const telemetryAuthoritative = hasCodexTelemetry();
@@ -221,16 +183,15 @@ function registerIpc() {
   ipcMain.handle("big-agent:get-sessions", () => allSessionEvents());
   ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: providerSnapshot(), legacy: allowCodexFallback ? codexDesktopSnapshot() : null }));
   ipcMain.handle("big-agent:get-providers", () => providerSnapshot());
-  ipcMain.handle("big-agent:provider-action", async (_event, provider: ProviderId, action: "setup" | "retry" | "launch") => {
+  ipcMain.handle("big-agent:provider-action", async (_event, provider: ProviderId, action: "setup" | "retry" | "launch" | "remove") => {
     if (!providerOrder.includes(provider)) throw new Error("Unknown provider");
-    if (!(["setup", "retry", "launch"] as string[]).includes(action)) throw new Error("Unknown provider action");
+    if (!(["setup", "retry", "launch", "remove"] as string[]).includes(action)) throw new Error("Unknown provider action");
     if (provider === "codex") await codexProvider?.action(action);
     else if (provider === "claude") await claudeProvider?.action(action);
     else await structuredProviders.find((candidate) => candidate.health().id === provider)?.action(action);
     return providerSnapshot();
   });
   ipcMain.handle("big-agent:image-preview", (_event, path: string) => imagePreview(path));
-  ipcMain.handle("big-agent:run-process", (_event, command: string, args: string[]) => runProcess(command, args));
   ipcMain.handle("big-agent:set-screen-awake", (_event, active: boolean) => setScreenAwake(Boolean(active)));
   ipcMain.handle("big-agent:toggle-fullscreen", (event) => {
     const window = windowForEvent(event);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLAUDE_HOOK_EVENTS, claudeHooksConfigured, claudeRegistryEvent, mergeClaudeHookSettings } from "./claude";
+import { CLAUDE_HOOK_EVENTS, claudeHooksConfigured, claudeRegistryEvent, mergeClaudeHookSettings, removeClaudeHookSettings } from "./claude";
 
 describe("Claude HTTP hook setup", () => {
   it("preserves user hooks and installs every observation event idempotently", () => {
@@ -11,10 +11,11 @@ describe("Claude HTTP hook setup", () => {
     const configured = mergeClaudeHookSettings(original);
     expect(configured.permissions).toEqual(original.permissions);
     expect((configured.hooks as Record<string, unknown[]>).PreToolUse[0]).toEqual(original.hooks.PreToolUse[0]);
-    expect(configured.allowedHttpHookUrls).toContain("http://127.0.0.1:*");
+    expect(configured.allowedHttpHookUrls).toContain("http://127.0.0.1:19777/hooks/claude");
     expect(claudeHooksConfigured(configured)).toBe(true);
     expect(Object.keys(configured.hooks as object)).toEqual(expect.arrayContaining([...CLAUDE_HOOK_EVENTS]));
     expect(mergeClaudeHookSettings(configured)).toEqual(configured);
+    expect(removeClaudeHookSettings(configured)).toEqual(original);
   });
 
   it("keeps an explicit native session title separate from the Claude agent name", () => {
