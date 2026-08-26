@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle } from "./codex-rollout";
+import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem } from "./codex-rollout";
 
 describe("Codex desktop rollout telemetry", () => {
   it("preserves the actual shell command instead of reducing it to bash", () => {
@@ -58,6 +58,44 @@ describe("Codex desktop rollout telemetry", () => {
       itemType: "fileChange",
       item: { changes: [], status: "inProgress" },
     });
+  });
+
+  it("keeps a command in its arrival position when it completes out of order", () => {
+    const state = {
+      items: [
+        {
+          item_type: "commandExecution",
+          item_json: JSON.stringify({ command: "long-running-task", status: "inProgress" }),
+          updated_at_ordinal: 10,
+          timestamp: 1,
+          callId: "call-a",
+          transient: true,
+        },
+        {
+          item_type: "commandExecution",
+          item_json: JSON.stringify({ command: "quick-task", status: "inProgress" }),
+          updated_at_ordinal: 11,
+          timestamp: 2,
+          callId: "call-b",
+          transient: true,
+        },
+      ],
+    };
+
+    const merged = reconcileCompletedRolloutItem(state.items, normalizeCodexRolloutItem({
+      type: "CommandExecution",
+      command: ["/bin/bash", "-lc", "long-running-task"],
+      status: "completed",
+    }), 3);
+
+    expect(merged).toBe(true);
+    expect(state.items.map((item) => item.updated_at_ordinal)).toEqual([10, 11]);
+    expect(state.items.map((item) => JSON.parse(item.item_json))).toEqual([
+      { command: "long-running-task", status: "completed" },
+      { command: "quick-task", status: "inProgress" },
+    ]);
+    expect(state.items[0]).toMatchObject({ callId: "call-a", transient: false });
+    expect(state.items[1]).toMatchObject({ callId: "call-b", transient: true });
   });
 
   it("closes an orphaned turn when its Codex agent loop has exited", () => {

@@ -516,8 +516,9 @@ function App() {
   const [help, setHelp] = useState(false);
   const [privacy, setPrivacy] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const now = useClock();
   const viewport = useViewport();
-  const workstreams = useMemo(() => groupWorkstreams(sessions, Date.now(), Number.POSITIVE_INFINITY), [sessions]);
+  const workstreams = useMemo(() => groupWorkstreams(sessions, now), [sessions, now]);
   const activeAgents = workstreams.flatMap((workstream) => workstream.agents).filter((agent) => isActiveStatus(agent.state.status));
   const isLiveAgent = (agent: AgentSession) => isActiveStatus(agent.state.status);
   const liveWorkstreams = workstreams.filter((workstream) => workstream.agents.some(isLiveAgent));

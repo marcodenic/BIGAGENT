@@ -10,6 +10,14 @@ function object(value: unknown): JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+function parseJson(value: string): JsonObject {
+  try {
+    return object(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
 function itemTextContent(value: unknown) {
   if (!Array.isArray(value)) return "";
   return value.map(object).map((part) => text(part.text)).filter(Boolean).join("\n");
@@ -96,6 +104,50 @@ export function normalizeCodexRolloutItem(value: unknown) {
     } };
   }
   return { itemType, item: {} };
+}
+
+type MutableLiveItem = {
+  item_type: string;
+  item_json: string;
+  timestamp: number;
+  transient?: boolean;
+};
+
+function liveItemIdentity(itemType: string, item: JsonObject) {
+  if (itemType === "commandExecution") return text(item.command).trim();
+  if (itemType === "fileChange") {
+    const changes = Array.isArray(item.changes) ? item.changes.map(object).map((change) => text(change.path)).filter(Boolean) : [];
+    return changes.join("\u0000");
+  }
+  if (itemType === "mcpToolCall" || itemType === "dynamicToolCall") {
+    const tool = text(item.tool, text(item.name));
+    return tool ? `${text(item.namespace, text(item.server))}\u0000${tool}` : "";
+  }
+  if (itemType === "imageView") return text(item.path);
+  if (itemType === "webSearch") return text(item.query);
+  return "";
+}
+
+/** Merge an item_completed payload into the row that announced the operation.
+ * Completion records do not carry the custom tool call id, so use their public
+ * operation identity and only fall back to type when there is one candidate.
+ * The caller's original ordinal therefore remains stable for the whole item. */
+export function reconcileCompletedRolloutItem(
+  items: MutableLiveItem[],
+  normalized: ReturnType<typeof normalizeCodexRolloutItem>,
+  timestamp: number,
+) {
+  if (!normalized.itemType) return false;
+  const candidates = items.filter((item) => item.transient && item.item_type === normalized.itemType);
+  const completedIdentity = liveItemIdentity(normalized.itemType, object(normalized.item));
+  const active = (completedIdentity
+    ? candidates.find((candidate) => liveItemIdentity(candidate.item_type, parseJson(candidate.item_json)) === completedIdentity)
+    : undefined) ?? (candidates.length === 1 ? candidates[0] : undefined);
+  if (!active) return false;
+  active.item_json = JSON.stringify(normalized.item);
+  active.timestamp = timestamp;
+  active.transient = false;
+  return true;
 }
 
 export function reconcileCodexTurnLifecycle(

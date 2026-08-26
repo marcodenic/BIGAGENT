@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { StringDecoder } from "node:string_decoder";
-import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle } from "./codex-rollout";
+import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem } from "./codex-rollout";
 
 type JsonObject = Record<string, unknown>;
 type ThreadDisplayMeta = {
@@ -132,13 +132,6 @@ function pushLiveItem(
 function completeLiveCall(state: LiveRolloutState, callId: string, timestamp: number) {
   const active = state.items.find((item) => item.callId === callId && item.transient);
   if (!active) return;
-  const matchingResult = state.items.some((item) => !item.transient
-    && item.item_type === active.item_type
-    && item.timestamp >= active.timestamp);
-  if (matchingResult) {
-    state.items = state.items.filter((item) => item !== active);
-    return;
-  }
   const item = parseJson(active.item_json);
   item.status = "completed";
   active.item_json = JSON.stringify(item);
@@ -233,7 +226,7 @@ function updateLiveRollout(path: string) {
       state.items = [];
     }
     const normalized = normalizeCodexRolloutItem(payload.item);
-    pushLiveItem(state, normalized, timestamp);
+    if (!reconcileCompletedRolloutItem(state.items, normalized, timestamp)) pushLiveItem(state, normalized, timestamp);
   }
   return state;
 }
