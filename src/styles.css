@@ -165,6 +165,9 @@ header button:hover { color: #efeee9; }
 .needs-attention .state-dot.status-waiting, .needs-attention .state-dot.status-approval { animation: urgent 1.25s ease-in-out infinite; }
 
 .workstream-activity { min-width: 0; min-height: 0; overflow: hidden; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
+.workstream-activity > .state-label,
+.workstream-activity > ol,
+.workstream-activity > .extra-agents { flex-shrink: 0; }
 .matrix-face {
   position: absolute;
   z-index: 1;
@@ -326,6 +329,10 @@ header button:hover { color: #efeee9; }
   min-width: 0;
   isolation: isolate;
 }
+.app:not(.layout-compact) .workstream-activity[data-fit="roomy"] .agent-focus + .rolling-activity,
+.app:not(.layout-compact) .workstream-activity[data-fit="compact"] .agent-focus + .rolling-activity {
+  margin-top: clamp(10px, 1.5vh, 20px);
+}
 .telemetry-step { opacity: .88; }
 .telemetry-depth-1 { opacity: .68; }
 .telemetry-depth-2 { opacity: .5; }
@@ -468,8 +475,8 @@ header button:hover { color: #efeee9; }
 .workstream-activity[data-fit="tight"] .agent-plan li:not([data-state="current"]) { display: none; }
 
 /* Once more than five live agents need attention, each gets an equal tile.
-   The current state and animated face remain visible; the active plan step is
-   retained while supporting detail yields to density. */
+   Six tiles retain rolling command detail; at seven or more, the current state,
+   animated face, and active plan step remain while supporting detail yields. */
 .agent-tile-board .workstream-board { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #292b27; }
 .board-count-6 .workstream-board { grid-template-rows: repeat(2, minmax(0, 1fr)); }
 .board-count-7 .workstream-board, .board-count-8 .workstream-board, .board-count-9 .workstream-board { grid-template-rows: repeat(3, minmax(0, 1fr)); }
@@ -499,7 +506,10 @@ header button:hover { color: #efeee9; }
 .agent-tile-board .agent-line { font-size: clamp(10px, .85vw, 14px); }
 .agent-tile-board .agent-focus { grid-template-columns: 7px 24px minmax(0, 1fr); gap: 8px; min-height: 0; padding-block: 3px 6px; font-size: clamp(18px, 1.55vw, 28px); }
 .agent-tile-board .agent-pulse { width: 6px; height: 6px; }
-.agent-tile-board .agent-commentary, .agent-tile-board .agent-step { display: none; }
+.agent-tile-board .agent-commentary,
+.agent-tile-board.board-count-7 .agent-step,
+.agent-tile-board.board-count-8 .agent-step,
+.agent-tile-board.board-count-9 .agent-step { display: none; }
 .agent-tile-board .agent-context { grid-template-columns: 7px 24px minmax(0, 1fr); column-gap: 8px; padding: 0 0 8px; font-size: clamp(11px, .95vw, 15px); }
 .agent-tile-board .agent-plan { padding: 6px 0 0; }
 .agent-tile-board .agent-plan > ol { display: block; }
