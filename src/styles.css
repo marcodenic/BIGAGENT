@@ -312,17 +312,18 @@ header button:hover { color: #efeee9; }
 .agent-plan li[data-state="current"] i { border-color: var(--status-color); background: var(--status-color); color: #10120d; box-shadow: 0 0 16px color-mix(in srgb, var(--status-color) 45%, transparent); }
 .agent-plan li[data-state="complete"] { color: #7c8f80; }
 .agent-plan li[data-state="complete"] i { border-color: var(--complete); color: var(--complete); }
-.rolling-activity { position: relative; min-width: 0; }
+.rolling-activity { position: relative; min-width: 0; isolation: isolate; }
 .telemetry-step { opacity: .88; }
 .telemetry-depth-1 { opacity: .68; }
 .telemetry-depth-2 { opacity: .5; }
 .telemetry-depth-3 { opacity: .34; }
 .telemetry-depth-4 { opacity: .2; }
+.rolling-activity .agent-step:not(.is-exiting) { position: relative; z-index: 1; }
 .rolling-activity .is-exiting {
   position: absolute;
   right: 0;
-  bottom: 0;
   left: 0;
+  z-index: 0;
   pointer-events: none;
   animation: activity-exit .3s ease forwards;
 }

@@ -179,6 +179,14 @@ function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
 }
 
 type ActivityStep = ReturnType<typeof activitySteps>[number];
+type RenderedActivity = {
+  step: ActivityStep;
+  exiting: boolean;
+  depth: number;
+  exitTop?: number;
+};
+
+const ACTIVITY_EXIT_MS = 300;
 
 function readableTool(tool: string) {
   return tool.replaceAll("_", " ").replaceAll("-", " ").trim();
@@ -196,54 +204,117 @@ function headlineDetail(step: ActivityStep) {
 }
 
 function RollingActivity({ steps }: { steps: ActivityStep[] }) {
-  const signature = steps.map((step) => `${step.id}\u0000${step.status}\u0000${step.detail}`).join("\u0001");
-  const [rendered, setRendered] = useState(() => steps.map((step) => ({ step, exiting: false })));
-  const positions = useRef(new Map<string, number>());
+  const signature = steps.map((step) => [step.id, step.status, step.phase, step.label, step.tool, step.detail, step.target].join("\u0000")).join("\u0001");
+  const [rendered, setRendered] = useState<RenderedActivity[]>(() => steps.map((step, depth) => ({ step, exiting: false, depth })));
+  const previousVisualTops = useRef(new Map<string, number>());
+  const animations = useRef(new Map<string, Animation>());
+  const exitTimers = useRef(new Map<string, number>());
+  const previousSignature = useRef(signature);
+  const animateNextLayout = useRef(true);
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (previousSignature.current === signature) return;
+    previousSignature.current = signature;
+
+    // Snapshot each row's *visual* position before cancelling an in-flight
+    // animation. Feed updates can arrive faster than the transition duration,
+    // so using the previous layout target makes rows jump or reverse direction.
+    const root = container.current;
+    const rootTop = root?.getBoundingClientRect().top ?? 0;
+    const visualTops = new Map<string, number>();
+    const relativeTops = new Map<string, number>();
+    for (const element of [...(root?.querySelectorAll<HTMLElement>("[data-activity-id]:not(.is-exiting)") ?? [])]) {
+      const id = element.dataset.activityId;
+      if (!id) continue;
+      const top = element.getBoundingClientRect().top;
+      visualTops.set(id, top);
+      relativeTops.set(id, top - rootTop);
+    }
+    previousVisualTops.current = visualTops;
+    for (const animation of animations.current.values()) animation.cancel();
+    animations.current.clear();
+
     const currentIds = new Set(steps.map((step) => step.id));
-    setRendered((previous) => [
-      ...steps.map((step) => ({ step, exiting: false })),
-      ...previous.filter((item) => !currentIds.has(item.step.id) && !item.exiting).map((item) => ({ ...item, exiting: true })),
-    ]);
-    const cleanup = window.setTimeout(() => {
-      setRendered((current) => current.filter((item) => currentIds.has(item.step.id)));
-    }, 320);
-    return () => window.clearTimeout(cleanup);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    for (const item of rendered) {
+      const id = item.step.id;
+      if (currentIds.has(id)) {
+        const timer = exitTimers.current.get(id);
+        if (timer !== undefined) window.clearTimeout(timer);
+        exitTimers.current.delete(id);
+      } else if (!item.exiting && !reduceMotion && !exitTimers.current.has(id)) {
+        const timer = window.setTimeout(() => {
+          exitTimers.current.delete(id);
+          setRendered((current) => current.filter((candidate) => candidate.step.id !== id || !candidate.exiting));
+        }, ACTIVITY_EXIT_MS);
+        exitTimers.current.set(id, timer);
+      }
+    }
+
+    animateNextLayout.current = true;
+    setRendered((current) => {
+      const active = steps.map((step, depth) => ({ step, exiting: false, depth }));
+      if (reduceMotion) return active;
+      const outgoing = current
+        .filter((item) => !currentIds.has(item.step.id))
+        .map((item) => item.exiting ? item : {
+          ...item,
+          exiting: true,
+          exitTop: relativeTops.get(item.step.id) ?? item.exitTop ?? 0,
+        });
+      return [...active, ...outgoing];
+    });
   }, [signature]);
 
   useLayoutEffect(() => {
+    // Removing an expired absolute-positioned exit row does not change layout.
+    // Re-running FLIP then would replay a nearly finished movement and create a
+    // visible hitch every 300ms.
+    if (!animateNextLayout.current) return;
+    animateNextLayout.current = false;
     const elements = [...(container.current?.querySelectorAll<HTMLElement>("[data-activity-id]") ?? [])];
-    const nextPositions = new Map<string, number>();
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     for (const element of elements) {
       const id = element.dataset.activityId;
       if (!id || element.classList.contains("is-exiting")) continue;
       const top = element.getBoundingClientRect().top;
-      nextPositions.set(id, top);
       if (reduceMotion) continue;
-      const previousTop = positions.current.get(id);
+      const previousTop = previousVisualTops.current.get(id);
+      let animation: Animation | undefined;
       if (previousTop === undefined) {
-        element.animate([
+        animation = element.animate([
           { opacity: 0, transform: "translateY(-10px) scale(.985)" },
           { opacity: Number.parseFloat(getComputedStyle(element).opacity), transform: "none" },
         ], { duration: 300, easing: "cubic-bezier(.2,.8,.2,1)" });
       } else if (Math.abs(previousTop - top) > 1) {
-        element.animate([
+        animation = element.animate([
           { transform: `translateY(${previousTop - top}px)` },
           { transform: "none" },
         ], { duration: 360, easing: "cubic-bezier(.2,.8,.2,1)" });
       }
+      if (animation) {
+        animations.current.set(id, animation);
+        animation.onfinish = () => {
+          if (animations.current.get(id) === animation) animations.current.delete(id);
+        };
+      }
     }
-    positions.current = nextPositions;
   }, [rendered]);
 
+  useEffect(() => () => {
+    for (const timer of exitTimers.current.values()) window.clearTimeout(timer);
+    for (const animation of animations.current.values()) animation.cancel();
+    exitTimers.current.clear();
+    animations.current.clear();
+  }, []);
+
   return <div ref={container} className="rolling-activity" aria-label="Recent agent activity">
-    {rendered.map(({ step, exiting }, index) => <div
+    {rendered.map(({ step, exiting, depth, exitTop }) => <div
       key={step.id}
       data-activity-id={step.id}
-      className={`agent-step telemetry-step telemetry-depth-${Math.min(index, 4)} ${step.tool ? "has-tool" : "no-tool"} status-${step.status} ${exiting ? "is-exiting" : ""}`}
+      className={`agent-step telemetry-step telemetry-depth-${Math.min(depth, 4)} ${step.tool ? "has-tool" : "no-tool"} status-${step.status} ${exiting ? "is-exiting" : ""}`}
+      style={exiting ? { top: exitTop } : undefined}
     >
       <i className="history-mark" aria-hidden="true">·</i>
       <span className="agent-number" />
