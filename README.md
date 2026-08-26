@@ -2,7 +2,7 @@
 
 An ambient, room-scale departures board for autonomous coding agents. BIG AGENT groups live sessions into stable workstreams, shows useful narrative activity instead of raw token streams, and makes completion, failure and requests for input visible from across the room.
 
-![BIG AGENT showing five live workstreams](docs/images/live-board.webp)
+![BIG AGENT showing three live coding workstreams in different lifecycle states](docs/images/demo-workstreams.webp)
 
 > **Public alpha:** Linux x86-64 is the currently tested distribution. macOS and Windows builds are not yet validated.
 
