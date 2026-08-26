@@ -198,10 +198,12 @@ header button:hover { color: #efeee9; }
 .status-complete .matrix-light.level-2 { fill: #c6d4cb; }
 .state-label {
   width: 100%;
+  height: 1.03em;
   box-sizing: border-box;
   margin: 0 0 clamp(5px, .9vh, 14px);
   padding-bottom: .13em;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   color: var(--status-color);
   font-size: clamp(2.4rem, min(10.8cqi, 10vmin), 10.25rem);
@@ -209,6 +211,12 @@ header button:hover { color: #efeee9; }
   line-height: .9;
   letter-spacing: -.072em;
   text-transform: uppercase;
+}
+.state-label > span {
+  display: block;
+  width: max-content;
+  transform: scaleX(var(--state-label-scale, 1));
+  transform-origin: left top;
 }
 
 .workstream-activity ol { list-style: none; margin: 0; padding: 0; }
@@ -225,12 +233,12 @@ header button:hover { color: #efeee9; }
   grid-template-columns: 10px 26px minmax(76px, auto) minmax(0, auto) minmax(100px, 1fr) auto;
   align-items: center;
   gap: clamp(8px, .9vw, 16px);
-  min-height: clamp(24px, 2.8vh, 36px);
+  height: var(--activity-row-height);
+  min-height: var(--activity-row-height);
   padding-block: clamp(2px, .35vh, 5px);
   line-height: 1.22;
   transition: opacity .45s ease;
 }
-.agent-step:first-child { min-height: clamp(34px, 4vh, 50px); }
 .agent-line:first-child { border-top-color: #34372f; }
 .agent-pulse { width: 7px; height: 7px; }
 .history-mark { color: #70736a; font-style: normal; text-align: center; }
@@ -312,7 +320,12 @@ header button:hover { color: #efeee9; }
 .agent-plan li[data-state="current"] i { border-color: var(--status-color); background: var(--status-color); color: #10120d; box-shadow: 0 0 16px color-mix(in srgb, var(--status-color) 45%, transparent); }
 .agent-plan li[data-state="complete"] { color: #7c8f80; }
 .agent-plan li[data-state="complete"] i { border-color: var(--complete); color: var(--complete); }
-.rolling-activity { position: relative; min-width: 0; isolation: isolate; }
+.rolling-activity {
+  --activity-row-height: clamp(24px, 2.8vh, 36px);
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+}
 .telemetry-step { opacity: .88; }
 .telemetry-depth-1 { opacity: .68; }
 .telemetry-depth-2 { opacity: .5; }
@@ -405,8 +418,7 @@ header button:hover { color: #efeee9; }
 .board-count-4 .agent-preview figcaption, .board-count-5 .agent-preview figcaption { display: none; }
 .layout-compact .workstream { padding: clamp(7px, 1.4vh, 16px) 0; }
 .layout-compact .state-label { margin-bottom: 6px; }
-.layout-compact .agent-step { min-height: clamp(18px, 2.3vh, 27px); }
-.layout-compact .agent-step:first-child { min-height: clamp(24px, 3vh, 34px); }
+.layout-compact .rolling-activity { --activity-row-height: clamp(18px, 2.3vh, 27px); }
 .layout-compact .matrix-face { top: 68%; width: min(calc(var(--identity-width) * .74), 205px); }
 
 /* Scale the complete information stack from the row's actual block size. This
@@ -426,9 +438,8 @@ header button:hover { color: #efeee9; }
     padding-bottom: min(3px, 1cqh);
     font-size: clamp(8px, min(.75cqi, 4.5cqh), 12px);
   }
-  .workstream .agent-step,
-  .workstream .agent-step:first-child {
-    min-height: min(22px, 8cqh);
+  .workstream .rolling-activity { --activity-row-height: min(22px, 8cqh); }
+  .workstream .agent-step {
     padding-block: 1px;
     font-size: clamp(9px, min(.9cqi, 4.5cqh), 14px);
   }
@@ -438,8 +449,7 @@ header button:hover { color: #efeee9; }
 @container workstream (max-height: 220px) {
   .workstream .state-label { font-size: clamp(1.55rem, min(4.8cqi, 24cqh), 3.5rem); }
   .workstream .agent-focus { font-size: clamp(16px, min(1.85cqw, 9.5cqh), 27px); }
-  .workstream .agent-step,
-  .workstream .agent-step:first-child { min-height: min(19px, 7cqh); }
+  .workstream .rolling-activity { --activity-row-height: min(19px, 7cqh); }
 }
 
 /* Content-aware fallbacks handle rows containing more agents or plan content
@@ -447,8 +457,8 @@ header button:hover { color: #efeee9; }
 .workstream-activity[data-fit="compact"] .state-label { font-size: clamp(1.5rem, min(4.6cqi, 22cqh), 3.4rem); }
 .workstream-activity[data-fit="compact"] .agent-focus { min-height: 0; padding-block: 2px; font-size: clamp(15px, min(1.75cqw, 8.5cqh), 25px); }
 .workstream-activity[data-fit="compact"] .agent-context { padding-bottom: 1px; font-size: clamp(8px, min(.7cqi, 4cqh), 11px); }
-.workstream-activity[data-fit="compact"] .agent-step,
-.workstream-activity[data-fit="compact"] .agent-step:first-child { min-height: min(18px, 6.5cqh); padding-block: 0; }
+.workstream-activity[data-fit="compact"] .rolling-activity { --activity-row-height: min(18px, 6.5cqh); }
+.workstream-activity[data-fit="compact"] .agent-step { padding-block: 0; }
 .workstream-activity[data-fit="compact"] .agent-plan { padding-block: 2px; }
 .workstream-activity[data-fit="tight"] .state-label { font-size: clamp(1.35rem, min(4.2cqi, 19cqh), 3rem); }
 .workstream-activity[data-fit="tight"] .agent-focus { min-height: 0; padding-block: 1px; font-size: clamp(14px, min(1.55cqw, 7.5cqh), 22px); }
@@ -769,7 +779,7 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
   .identity-meta { margin-top: 6px; }
   .matrix-face { width: min(calc(var(--identity-width) * .56), 142px); }
   .agent-line { font-size: clamp(8px, min(.85vw, 2.4vh), 13px); }
-  .agent-step, .agent-step:first-child { min-height: clamp(16px, 4.2vh, 23px); }
+  .rolling-activity { --activity-row-height: clamp(16px, 4.2vh, 23px); }
   .workstream time { font-size: clamp(19px, min(3.3vw, 7vh), 38px); }
   .completion-summary { padding: 12px 0; gap: 24px; }
   .completion-hero h1 { font-size: clamp(46px, min(8vw, 18vh), 92px); }

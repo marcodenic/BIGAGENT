@@ -153,7 +153,6 @@ function ModelIdentity({ agents }: { agents: AgentSession[] }) {
 }
 
 function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
-  const seen = new Set<string>();
   return agent.state.recent.flatMap((event, eventIndex) => {
     const status = event.status ?? "working";
     if (eventIndex > 0 && event.meta?.activityClass === "telemetry" && status === "thinking" && !event.tool && !event.command) return [];
@@ -162,9 +161,6 @@ function activitySteps(agent: AgentSession, privacy: boolean, limit: number) {
     const rawDetail = event.detail || event.command || (event.files?.length ? `Updating ${event.files.slice(0, 2).join(", ")}` : "Working");
     const detail = privacy ? "Agent activity in progress" : displayText(rawDetail, "Working");
     const target = privacy ? "" : event.target || "";
-    const key = `${label}\u0000${tool}\u0000${detail}\u0000${target}`;
-    if (seen.has(key)) return [];
-    seen.add(key);
     const narrative = event.meta?.activityClass === "narrative";
     const declaredKind = event.meta?.narrativeKind;
     const narrativeKind = declaredKind === "reasoning" || event.kind === "reasoning.summary"
@@ -352,23 +348,25 @@ function AgentPlan({ plan, privacy }: { plan: string[]; privacy: boolean }) {
 
 function FittedStateLabel({ label }: { label: string }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const copy = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    const element = heading.current;
-    if (!element) return;
+    const frame = heading.current;
+    const text = copy.current;
+    if (!frame || !text) return;
     const fit = () => {
-      element.style.removeProperty("font-size");
-      const available = element.clientWidth;
-      const preferred = Number.parseFloat(window.getComputedStyle(element).fontSize);
-      const required = element.scrollWidth;
-      if (!available || !preferred || required <= available) return;
-      element.style.fontSize = `${Math.max(16, Math.floor(preferred * (available / required) * .98))}px`;
+      text.style.setProperty("--state-label-scale", "1");
+      const available = frame.clientWidth;
+      const required = text.scrollWidth;
+      const scale = available > 0 && required > available ? Math.max(.58, available / required) : 1;
+      text.style.setProperty("--state-label-scale", String(scale));
     };
     const observer = new ResizeObserver(fit);
-    observer.observe(element.parentElement ?? element);
+    observer.observe(frame);
     fit();
+    void document.fonts?.ready.then(fit);
     return () => observer.disconnect();
   }, [label]);
-  return <h1 ref={heading} className="state-label">{label}</h1>;
+  return <h1 ref={heading} className="state-label"><span ref={copy}>{label}</span></h1>;
 }
 
 function ContentFittedActivity({ children }: { children: React.ReactNode }) {
