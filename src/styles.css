@@ -417,6 +417,11 @@ header button.agents-toggle { opacity: 1; }
 .board-count-1 .matrix-face { top: 59%; width: min(calc(var(--identity-width) * .94), 315px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
 .board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(28px, 3.1cqw, 54px); }
+/* Only a lone agent gets the larger narrative treatment. */
+.board-count-1 .single-agent .agent-focus { font-size: clamp(36px, min(4.5cqw, 9cqh), 78px); line-height: 1.1; }
+.board-count-1 .single-agent .agent-focus-copy { -webkit-line-clamp: 3; }
+.board-count-1 .single-agent .workstream-activity[data-fit="roomy"] .agent-step { font-size: clamp(18px, 1.8vw, 30px); }
+.board-count-1 .single-agent .workstream-activity[data-fit="roomy"] .rolling-activity { --activity-row-height: clamp(30px, 3.5vh, 46px); }
 .board-count-1 .agent-context { padding-bottom: clamp(10px, 1.1vh, 16px); font-size: clamp(18px, 1.8cqi, 30px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
 .board-count-2 .agent-focus { min-height: clamp(52px, 5.8vh, 74px); font-size: clamp(24px, 2.5cqw, 40px); }
@@ -471,16 +476,21 @@ header button.agents-toggle { opacity: 1; }
   .workstream .rolling-activity { --activity-row-height: min(19px, 7cqh); }
 }
 
+@container workstream (max-height: 300px) {
+  .board-count-1 .single-agent .agent-focus { font-size: clamp(24px, min(3.3cqw, 13cqh), 42px); }
+  .board-count-1 .single-agent .agent-focus-copy { -webkit-line-clamp: 2; }
+}
+
 /* Content-aware fallbacks handle rows containing more agents or plan content
    than their siblings. Only the overflowing row gives up secondary density. */
 .workstream-activity[data-fit="compact"] .state-label { font-size: clamp(1.5rem, min(4.6cqi, 22cqh), 3.4rem); }
-.workstream-activity[data-fit="compact"] .agent-focus { min-height: 0; padding-block: 2px; font-size: clamp(15px, min(1.75cqw, 8.5cqh), 25px); }
+.workstream .workstream-activity[data-fit="compact"] .agent-focus { min-height: 0; padding-block: 2px; font-size: clamp(15px, min(1.75cqw, 8.5cqh), 25px); }
 .workstream-activity[data-fit="compact"] .agent-context { padding-bottom: 1px; font-size: clamp(8px, min(.7cqi, 4cqh), 11px); }
 .workstream-activity[data-fit="compact"] .rolling-activity { --activity-row-height: min(18px, 6.5cqh); }
 .workstream-activity[data-fit="compact"] .agent-step { padding-block: 0; }
 .workstream-activity[data-fit="compact"] .agent-plan { padding-block: 2px; }
 .workstream-activity[data-fit="tight"] .state-label { font-size: clamp(1.35rem, min(4.2cqi, 19cqh), 3rem); }
-.workstream-activity[data-fit="tight"] .agent-focus { min-height: 0; padding-block: 1px; font-size: clamp(14px, min(1.55cqw, 7.5cqh), 22px); }
+.workstream .workstream-activity[data-fit="tight"] .agent-focus { min-height: 0; padding-block: 1px; font-size: clamp(14px, min(1.55cqw, 7.5cqh), 22px); }
 .workstream-activity[data-fit="tight"] .agent-context { padding: 0; }
 .workstream-activity[data-fit="tight"] .telemetry-depth-3,
 .workstream-activity[data-fit="tight"] .telemetry-depth-4 { display: none; }
@@ -564,6 +574,7 @@ header button.agents-toggle { opacity: 1; }
 .layout-portrait .workstream-identity h2 { font-size: clamp(20px, 3.2vw, 34px); }
 .layout-portrait .agent-line { font-size: clamp(11px, 1.65vw, 17px); }
 .layout-portrait .agent-focus { min-height: clamp(48px, 4.8vh, 68px); font-size: clamp(20px, 3.3cqw, 34px); }
+.layout-portrait.board-count-1 :where(.single-agent) .agent-focus { font-size: clamp(30px, min(5.2cqw, 6cqh), 62px); }
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
 .layout-portrait .matrix-face {
@@ -584,9 +595,10 @@ header button.agents-toggle { opacity: 1; }
 .layout-portrait.board-count-1 .workstream.single-agent .matrix-face {
   left: 50%;
   right: auto;
-  top: 72%;
-  width: min(70vw, 50vh, 680px);
-  transform: translate(-50%, -50%);
+  top: auto;
+  bottom: 2vh;
+  width: min(62vw, 28vh, 440px);
+  transform: translateX(-50%);
 }
 
 /* Dense portrait boards need their own hierarchy. Preserve the tile's left
