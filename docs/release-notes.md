@@ -1,13 +1,15 @@
-# BIG AGENT 0.1.3 preview
+# BIG AGENT 0.1.4 preview
 
-Native downloads for macOS (Apple Silicon and Intel), Windows x64, and Linux x64.
+- New transparent character icon for macOS, Windows, and Linux.
+- Larger white activity text when one agent is running, with more room to wrap.
+- Larger text and spacing in the five activity-history rows underneath.
+- Portrait layout adjustments to keep the character clear of the text.
+- Mac installation workaround documented in the README.
 
-- Persistent run summary with the actual participating characters celebrating, agent counts, elapsed time, and anonymous PNG export.
-- Randomised character colours that stay consistent throughout each session.
-- Bundled observation bridge, improved provider discovery, and platform-specific process and hook handling.
+## Mac download
 
-On Mac, choose **mac-arm64.dmg** for Apple Silicon (M1 or newer), or **mac-x64.dmg** for Intel, then move BIG AGENT to Applications.
+Choose **mac-arm64.dmg** for Apple Silicon (M1 or newer), or **mac-x64.dmg** for Intel. Open the DMG and move BIG AGENT into Applications, replacing the old version after quitting it.
 
-This is an unsigned preview: macOS and Windows may show security prompts. Native automated tests and packaged-app startup checks run for every platform before publication; full provider workflows still need testing on your machine.
+This preview is still unsigned and not notarised. If macOS reports that the app is damaged or cannot be opened, follow the [unsigned Mac preview instructions](https://github.com/marcodenic/BIGAGENT#opening-the-unsigned-mac-preview).
 
-SHA256SUMS contains checksums for every installer.
+All four platforms must pass native automated tests and packaged-app startup checks before publication. SHA256SUMS contains checksums for every installer.

@@ -206,7 +206,7 @@ async function createWindow() {
     minHeight: 320,
     backgroundColor: "#070806",
     icon: process.platform === "linux"
-      ? app.isPackaged ? join(process.resourcesPath, "icon.png") : join(__dirname, "../../electron/assets/128x128.png")
+      ? app.isPackaged ? join(process.resourcesPath, "icon.png") : join(__dirname, "../../electron/assets/icon.png")
       : undefined,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),

@@ -1,7 +1,7 @@
 {
   "name": "big-agent",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "desktopName": "big-agent",
   "description": "An ambient room-scale display for autonomous agents",
   "author": "BIG AGENT contributors",
@@ -62,7 +62,7 @@
     ],
     "extraResources": [
       {
-        "from": "electron/assets/128x128.png",
+        "from": "electron/assets/icon.png",
         "to": "icon.png"
       },
       {
@@ -80,7 +80,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "icon": "electron/assets/128x128.png"
+      "icon": "electron/assets/icon.png"
     },
     "mac": {
       "icon": "electron/assets/icon.icns",
