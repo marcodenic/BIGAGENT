@@ -14,11 +14,35 @@ Download the installer for your platform from [GitHub Releases](https://github.c
 - **Windows:** run the `win-x64.exe` installer.
 - **Mac:** open the `mac-arm64.dmg` (Apple Silicon) or `mac-x64.dmg` (Intel) and move BIG AGENT to Applications.
 
-Alpha builds are unsigned; macOS and Windows may show security warnings. Verify downloads against `SHA256SUMS`. The new workflows prepare platform installers; they do not retroactively add them to existing releases.
+Alpha builds are unsigned; macOS and Windows may show security warnings. Verify downloads against `SHA256SUMS`. For a blocked Mac install, see [Opening the unsigned Mac preview](#opening-the-unsigned-mac-preview).
 
 The first-run **FIND MY AGENTS** screen detects supported providers. Nothing is added to another application's configuration until you click its setup button; every configured provider also offers **REMOVE INTEGRATION**.
 
 ![Provider discovery and setup](docs/images/provider-discovery.webp)
+
+## Opening the unsigned Mac preview
+
+Mac previews are not yet signed with an Apple Developer ID or notarised by Apple. macOS may report that **“BIG AGENT is damaged and can’t be opened”**. This can be caused by the unsigned build; the message alone does not confirm that the download is intact.
+
+Only use this workaround for a copy you trust from this repository's [GitHub Releases](https://github.com/marcodenic/BIGAGENT/releases). Check the downloaded DMG against the release's `SHA256SUMS` before proceeding. On a modern Mac with an M-series chip, choose `mac-arm64.dmg`; Intel Macs need `mac-x64.dmg`.
+
+1. Click **Cancel** on the warning and drag **BIG AGENT** from the DMG into **Applications**.
+2. Open **Terminal** and remove the download quarantine from this app:
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/BIG AGENT.app"
+   ```
+
+3. Open **BIG AGENT** from Applications again.
+
+If it still fails because of its signature, you can apply a local ad-hoc signature, then try again:
+
+```bash
+codesign --force --deep --sign - "/Applications/BIG AGENT.app"
+xattr -dr com.apple.quarantine "/Applications/BIG AGENT.app"
+```
+
+These commands apply only to BIG AGENT; they do not disable Gatekeeper system-wide. Removing quarantine bypasses the downloaded-app check for this copy. A local signature does not verify the publisher or provide Apple notarisation. You may need to repeat the workaround after installing another unsigned preview. If a command fails or the app still will not open, report the exact error rather than disabling macOS security globally.
 
 ## Supported providers
 
