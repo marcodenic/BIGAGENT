@@ -1,3 +1,4 @@
+import { commandActivity } from "../command-activity";
 import { isAgentEvent, normalizeSimpleEvent, type AgentEvent, type AgentPhase, type AgentStatus, type EventKind, type SimpleEvent } from "../../src/core/protocol";
 
 export type TelemetryFormat = "protocol" | "hook" | "otlp-traces" | "otlp-logs" | "otlp-metrics" | "opencode" | "acp" | "codex-app-server" | "codex-json";
@@ -615,12 +616,17 @@ function codexEvents(envelope: TelemetryEnvelope) {
   if (/delta$/.test(eventType)) return [];
   if (/agentmessagedelta|agentmessage/.test(eventType) || itemType === "agentmessage") {
     const detail = text(item.text);
-    if (!detail) return [];
+    if (!detail) return /itemstarted/.test(eventType)
+      ? [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail: "Writing a response" })] : [];
     return [makeEvent(envelope, basePayload, "working", "activity", { ...common, phase: "responding", label: "RESPONDING", detail, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "message" } })];
   }
   if (/reasoning/.test(eventType) || itemType === "reasoning") {
     const summary = uniqueTextParts(item.summary).join(" ");
-    if (!summary) return [];
+    if (!summary) return [makeEvent(envelope, basePayload, /itemcompleted/.test(eventType) ? "working" : "thinking", "activity", {
+      ...common, phase: /itemcompleted/.test(eventType) ? "receiving" : "planning",
+      label: /itemcompleted/.test(eventType) ? "WORKING" : "THINKING",
+      detail: /itemcompleted/.test(eventType) ? "Reasoning finished" : "Planning the next step",
+    })];
     return [makeEvent(envelope, basePayload, "thinking", "reasoning.summary", { ...common, phase: "planning", detail: summary, meta: { rawEventName: rawType, activityClass: "narrative", narrativeKind: "reasoning" } })];
   }
   if (/filechange|patch/.test(eventType) || itemType === "filechange") {
@@ -633,7 +639,7 @@ function codexEvents(envelope: TelemetryEnvelope) {
     const command = text(item.command, params.command);
     const finished = /completed|itemcompleted/.test(eventType);
     if (finished) return [makeEvent(envelope, basePayload, "working", "command.end", { ...common, phase: "receiving", command, detail: "Command finished" })];
-    const activity = toolActivity(command?.split(/\s+/, 1)[0], command);
+    const activity = { ...commandActivity(command ?? ""), detail: command || "Running command" };
     return [makeEvent(envelope, basePayload, activity.status, "command.start", { ...common, ...activity, command })];
   }
   if (/toolcall|mcptool|dynamictool/.test(eventType) || /toolcall/.test(itemType)) {

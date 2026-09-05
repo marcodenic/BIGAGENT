@@ -14,24 +14,28 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "node scripts/electron-vite.mjs",
-    "build": "tsc -b && electron-vite build",
+    "dev": "node scripts/build-bridge.mjs && node scripts/electron-vite.mjs",
+    "build": "tsc -b && electron-vite build && node scripts/build-bridge.mjs",
     "start": "node scripts/electron-vite.mjs preview",
     "preview": "node scripts/electron-vite.mjs preview",
     "package": "pnpm build && electron-builder",
     "package:dir": "pnpm build && electron-builder --dir",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke-test.mjs",
+    "checksums": "node scripts/checksums.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
     "@lobehub/icons-static-svg": "^1.94.0",
+    "cross-spawn": "7.0.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@types/cross-spawn": "6.0.6",
     "@types/node": "^26.3.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -40,6 +44,7 @@
     "electron": "42.1.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
+    "esbuild": "0.21.5",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.8"
@@ -65,7 +70,7 @@
         "to": "telemetry/otel-collector.yaml"
       },
       {
-        "from": "scripts/big-agent.mjs",
+        "from": "out/bridge/big-agent.mjs",
         "to": "bin/big-agent.mjs"
       }
     ],
@@ -78,10 +83,29 @@
       "icon": "electron/assets/128x128.png"
     },
     "mac": {
-      "icon": "electron/assets/icon.icns"
+      "icon": "electron/assets/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "icon": "electron/assets/icon.ico"
+      "icon": "electron/assets/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "artifactName": "BIG-AGENT-${version}-${os}-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     }
+  },
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24"
   }
 }

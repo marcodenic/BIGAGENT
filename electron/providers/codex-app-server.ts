@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, writeFile } from "node:fs/promises";
@@ -43,10 +43,10 @@ async function run(binary: string, args: string[], timeoutMs = 8_000, env?: Node
       child.kill("SIGTERM");
       reject(new Error(`${args.join(" ")} timed out`));
     }, timeoutMs);
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.stdout!.setEncoding("utf8");
+    child.stderr!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr!.on("data", (chunk: string) => { stderr += chunk; });
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -60,6 +60,7 @@ async function run(binary: string, args: string[], timeoutMs = 8_000, env?: Node
 }
 
 async function installStandaloneCodex() {
+  if (process.platform === "win32") throw new Error("Install the standalone Codex CLI for Windows, then choose RECHECK");
   const response = await fetch("https://chatgpt.com/codex/install.sh", { redirect: "follow" });
   if (!response.ok) throw new Error(`Codex installer returned ${response.status}`);
   const script = await response.text();
@@ -211,7 +212,7 @@ export class CodexAppServerProvider {
     const detail = !this.binary
       ? "Codex CLI was not found"
       : this.standaloneMissing
-        ? "The official standalone Codex CLI is required for the shared daemon"
+        ? process.platform === "win32" ? "Install the standalone Codex CLI for Windows, then choose RECHECK" : "The official standalone Codex CLI is required for the shared daemon"
       : !this.configured && canLaunch
         ? "App Server available · set up Codex Desktop to join the shared feed"
       : this.lastError && !this.connected
@@ -224,7 +225,8 @@ export class CodexAppServerProvider {
               ? "Shared feed connected · Codex is not open"
               : "Connecting to the shared App Server";
     const actions: ProviderHealth["actions"] = [];
-    if (this.standaloneMissing) actions.push({ id: "setup", label: "INSTALL CODEX CLI" });
+    if (this.standaloneMissing && process.platform !== "win32") actions.push({ id: "setup", label: "INSTALL CODEX CLI" });
+    else if (this.standaloneMissing) actions.push({ id: "retry", label: "RECHECK" });
     else if (!this.configured && canLaunch) actions.push({ id: "setup", label: "SET UP CODEX" });
     if (this.binary && !this.connected && !this.standaloneMissing) actions.push({ id: "retry", label: "RETRY" });
     if (canLaunch) actions.push({ id: "launch", label: "OPEN CODEX" });

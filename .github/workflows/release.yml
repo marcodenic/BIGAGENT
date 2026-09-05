@@ -1,33 +1,84 @@
-name: Linux release
+name: Desktop release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  appimage:
-    runs-on: ubuntu-latest
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - os: windows-2022
+            platform: windows
+            arch: x64
+          - os: macos-15-intel
+            platform: macos
+            arch: x64
+          - os: macos-15
+            platform: macos
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: 24
+      - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: pnpm package
-      - name: Create checksum
-        run: cd release && sha256sum *.AppImage > SHA256SUMS
-      - uses: softprops/action-gh-release@v2
+      - run: pnpm package --${{ matrix.arch }} --publish never
+      - name: Smoke test packaged app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm smoke
+      - name: Smoke test packaged app (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: pnpm smoke
+      - uses: actions/upload-artifact@v4
         with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            release/*.AppImage
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+
+  release:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: release
+          merge-multiple: true
+      - run: node scripts/checksums.mjs release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: all-installers-with-checksums
+          path: release/*
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: |
-            release/*.AppImage
-            release/SHA256SUMS
+          files: release/*

@@ -17,6 +17,9 @@ importers:
       '@lobehub/icons-static-svg':
         specifier: ^1.94.0
         version: 1.94.0
+      cross-spawn:
+        specifier: 7.0.6
+        version: 7.0.6
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -27,6 +30,9 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
     devDependencies:
+      '@types/cross-spawn':
+        specifier: 6.0.6
+        version: 6.0.6
       '@types/node':
         specifier: ^26.3.0
         version: 26.3.0
@@ -51,6 +57,9 @@ importers:
       electron-vite:
         specifier: 5.0.0
         version: 5.0.0(supports-color@7.2.0)(vite@5.4.21(@types/node@26.3.0))
+      esbuild:
+        specifier: 0.21.5
+        version: 0.21.5
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -716,6 +725,9 @@ packages:
 
   '@types/cacheable-request@6.0.3':
     resolution: {integrity: sha512-IQ3EbTzGxIigb1I3qPZc1rWJnH0BmSKv5QYTalEwweFvyBDLSAe24zP0le/hyi7ecGfZVlIVAg4BZqb8WBwKqw==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
@@ -2530,6 +2542,10 @@ snapshots:
       '@types/keyv': 3.1.4
       '@types/node': 26.3.0
       '@types/responselike': 1.0.3
+
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 26.3.0
 
   '@types/debug@4.1.13':
     dependencies:

@@ -133,8 +133,14 @@ export function replaceSessionSource(
   // Preserve older display history without allowing it to mutate rebuilt state.
   for (const [id, session] of Object.entries(next)) {
     if (session.source !== source || !previous[id] || previous[id].runId !== session.runId) continue;
+    if (session.state.status === "complete" && previous[id].state.status === "complete") {
+      session.state.endedAt = previous[id].state.endedAt;
+    }
     const seen = new Set<string>();
     session.state.recent = [...session.state.recent, ...previous[id].state.recent].filter((event) => !seen.has(event.id) && Boolean(seen.add(event.id))).slice(0, 80);
+  }
+  for (const [id, session] of Object.entries(previous)) {
+    if (!next[id] && session.state.status === "complete" && now - (session.state.endedAt ?? session.updatedAt) <= 20_000) next[id] = session;
   }
   return next;
 }
@@ -208,24 +214,13 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
 }
 
 export function activeBoardWorkstreams(workstreams: Workstream[]) {
-  return workstreams
-    .filter((workstream) => workstream.agents.some((agent) => activeStatuses.has(agent.state.status)
-      || agent.state.status === "error"
-      || (agent.state.status === "complete" && agent.state.completionScope === "turn")
-      || (Boolean(agent.parentSessionId) && agent.state.status === "complete")))
-    .map((workstream) => ({
-      ...workstream,
-      // A completed sibling remains visible beside live agents for the normal
-      // terminal TTL instead of vanishing the moment it reports completion.
-      // If its parent has already gone turn-idle, the child still keeps its own
-      // DONE row without being mistaken for an overall session completion.
-      agents: workstream.agents.filter((agent) => activeStatuses.has(agent.state.status)
-        || agent.state.status === "error"
-        || (agent.state.status === "complete"
-          && (agent.state.completionScope === "turn"
-            || Boolean(agent.parentSessionId)
-            || workstream.agents.some((candidate) => activeStatuses.has(candidate.state.status))))),
-    }));
+  // If any row requires the board, include every unexpired completed row too.
+  // Otherwise the board suppresses the root completion summary and hides DONE
+  // roots beside failed agents or recently completed turns/children.
+  const needsBoard = workstreams.some((workstream) => workstream.agents.some((agent) =>
+    activeStatuses.has(agent.state.status) || agent.state.status === "error"
+    || (agent.state.status === "complete" && (agent.state.completionScope === "turn" || Boolean(agent.parentSessionId)))));
+  return needsBoard ? workstreams : [];
 }
 
 /** Single lifecycle projection used by the renderer. Keeping these related

@@ -929,3 +929,18 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 @media (prefers-reduced-motion: reduce) {
   *, *::before { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* A run's cast stays visible until the next observed work begins. */
+.run-recap { min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: safe center; padding: clamp(24px, 4vh, 64px) 0; text-align: center; gap: clamp(18px, 3vh, 40px); }
+.recap-heading h1 { margin: 0; font-size: clamp(64px, 12vw, 190px); font-weight: 500; line-height: .9; letter-spacing: -.08em; color: var(--complete); }
+.recap-heading p { margin: 24px 0 0; color: #b6b8af; font: 400 clamp(12px, 1.3vw, 20px) "Geist Mono Variable", monospace; }
+.recap-heading p span { padding: 0 10px; }
+.recap-cast { display: flex; flex-wrap: wrap; justify-content: center; width: min(100%, 1200px); gap: clamp(12px, 2vw, 32px); }
+.recap-character { flex: 0 1 clamp(120px, 19vw, 240px); min-width: 0; }
+.recap-cast-grid .recap-character { flex-basis: clamp(110px, 15vw, 180px); }
+.app .recap-character .matrix-face { display: block; position: relative; left: auto; top: auto; transform: none; width: 100%; opacity: 1; }
+.recap-character small { display: block; color: #8b8e84; font: 400 12px "Geist Mono Variable", monospace; margin-top: 8px; }
+.recap-ready { margin: 0; color: #8b8e84; font: 300 clamp(13px, 1.3vw, 20px) "Geist Mono Variable", monospace; }
+.recap-save { padding: 10px 14px; color: #8b8e84; font: 400 11px "Geist Mono Variable", monospace; letter-spacing: .1em; }
+.recap-save:hover { color: #efeee9; }
+.recap-save:disabled { opacity: .5; cursor: wait; }

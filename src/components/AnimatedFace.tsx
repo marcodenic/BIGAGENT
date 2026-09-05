@@ -4,7 +4,7 @@ import { OfficialGrokBotRenderer } from "../vendor/grok-bot-0.18/renderer";
 import {
   OFFICIAL_GROK_COLORS,
   animatedStateForStatus,
-  personalityColor,
+  personalityPalette,
   personalityShape,
   type AnimatedFaceColor,
   type AnimatedFaceShape,
@@ -36,8 +36,7 @@ function AnimatedFaceComponent({ status, phase, seed, personality, attention, si
   const [paused, setPaused] = useState(() => document.hidden);
   const state = expression ?? animatedStateForStatus(status, attention, phase);
   const selectedShape = shape ?? personalityShape(personality);
-  const selectedColor = color ?? personalityColor(personality);
-  const palette = OFFICIAL_GROK_COLORS[selectedColor];
+  const palette = useMemo(() => color ? OFFICIAL_GROK_COLORS[color] : personalityPalette(personality), [color, personality]);
   const style = useMemo(() => ({
     "--fg": palette.flat,
     "--bg": "#0b0c0a",

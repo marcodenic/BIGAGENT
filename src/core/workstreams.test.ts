@@ -7,6 +7,30 @@ function event(sessionId: string, threadId: string, status: "thinking" | "testin
 }
 
 describe("workstream projection", () => {
+  it("shows completed roots in other workstreams while work continues", () => {
+    let sessions = applySessionEvent({}, event("live", "one", "thinking", "Working"), 1_000);
+    sessions = applySessionEvent(sessions, event("done", "two", "complete", "Finished"), 2_000);
+    expect(activeBoardWorkstreams(groupWorkstreams(sessions, 2_000))).toHaveLength(2);
+    expect(activeBoardWorkstreams(groupWorkstreams(sessions, 22_001))).toHaveLength(1);
+  });
+
+  it("does not restart the completion countdown on snapshot replay", () => {
+    const done = event("done", "project", "complete", "Finished");
+    let sessions = replaceSessionSource({}, "codex", [done], 1_000);
+    sessions = replaceSessionSource(sessions, "codex", [done], 15_000);
+    expect(groupWorkstreams(sessions, 21_001)).toHaveLength(0);
+  });
+
+  it.each(["error", "turn", "child"])("keeps completed roots beside a %s row when no work is running", (kind) => {
+    let sessions = applySessionEvent({}, event("done", "one", "complete", "Finished"), 1_000);
+    const other = normalizeSimpleEvent({ status: kind === "error" ? "error" : "complete",
+      meta: { sessionId: "other", threadId: "two", ...(kind === "child" ? { parentSessionId: "parent" } : {}) } }, "other");
+    if (kind === "turn") other.kind = "turn.end";
+    sessions = applySessionEvent(sessions, other, 2_000);
+    expect(activeBoardWorkstreams(groupWorkstreams(sessions, 2_000))).toHaveLength(2);
+    expect(activeBoardWorkstreams(groupWorkstreams(sessions, 22_001))).toHaveLength(kind === "error" ? 1 : 0);
+  });
+
   it("groups several sessions into one stable workstream", () => {
     let sessions = applySessionEvent({}, event("01", "project", "thinking", "Planning"), 1_000, "codex");
     sessions = applySessionEvent(sessions, event("02", "project", "testing", "Running tests"), 2_000, "codex");
@@ -126,6 +150,8 @@ describe("workstream projection", () => {
     let sessions = replaceSessionSource({}, "codex", [running, done], 1_000);
     expect(groupWorkstreams(sessions, 1_000)).toHaveLength(2);
     sessions = replaceSessionSource(sessions, "codex", [running], 2_000);
+    expect(Object.keys(sessions)).toEqual(["01", "02"]);
+    sessions = replaceSessionSource(sessions, "codex", [running], 21_001);
     expect(Object.keys(sessions)).toEqual(["01"]);
     const completedOnly = applySessionEvent({}, done, 1_000, "codex");
     expect(groupWorkstreams(completedOnly, 21_001)).toHaveLength(0);

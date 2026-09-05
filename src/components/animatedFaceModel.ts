@@ -48,12 +48,28 @@ export function animatedStateForStatus(status: AgentStatus, attention = false, p
 }
 
 const SHAPES: readonly AnimatedFaceShape[] = ["blob", "pebble", "bean", "egg", "squircle", "tablet", "capsule", "cylinder", "hex", "gem", "crystal", "wedge", "shield", "dome", "arch", "cloud", "teardrop", "leaf"];
-const COLORS: readonly AnimatedFaceColor[] = ["yellow", "green", "cyan", "blue", "violet", "magenta", "orange", "red", "brown", "gray"];
+// One random salt per app launch. Deriving colours from it preserves identity
+// across rerenders, layout changes, and a remounted completion screen.
+const colorSessionSeed = crypto.getRandomValues(new Uint32Array(1))[0];
 
-export function personalityColor(personality: number): AnimatedFaceColor {
-  return COLORS[Math.abs(personality) % COLORS.length];
+export function personalityPalette(personality: number, sessionSeed = colorSessionSeed) {
+  const sample = (channel: string) => faceHash(`${sessionSeed}:${personality}:${channel}`) / 0x100000000;
+  const hue = sample("hue") * 360;
+  const saturation = 70 + sample("saturation") * 18;
+  const lightness = 58 + sample("lightness") * 6;
+  const hsl = (light: number) => `hsl(${hue.toFixed(2)} ${saturation.toFixed(2)}% ${light.toFixed(2)}%)`;
+  return { from: hsl(lightness + 5), to: hsl(lightness - 9), flat: hsl(lightness) };
 }
 
 export function personalityShape(personality: number): AnimatedFaceShape {
   return SHAPES[Math.abs(personality) % SHAPES.length];
+}
+
+export function faceHash(value: string) {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }

@@ -11,16 +11,34 @@ permissions:
 
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: macos-15-intel
+            arch: x64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: 24
+      - uses: pnpm/action-setup@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: pnpm build
+      - run: pnpm package:dir --${{ matrix.arch }} --publish never
+      - name: Smoke test packaged app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm smoke
+      - name: Smoke test packaged app (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: pnpm smoke

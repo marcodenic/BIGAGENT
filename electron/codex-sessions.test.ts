@@ -1,3 +1,6 @@
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLifecycle, reconcileCompletedRolloutItem, splitCompleteJsonLines } from "./codex-rollout";
 
@@ -41,10 +44,10 @@ describe("Codex desktop rollout telemetry", () => {
   it("converts rollout file URLs into previewable local paths", () => {
     expect(normalizeCodexRolloutItem({
       type: "ImageView",
-      path: "file:///tmp/agent-output.png",
+      path: pathToFileURL(join(tmpdir(), "agent-output.png")).href,
     })).toEqual({
       itemType: "imageView",
-      item: { path: "/tmp/agent-output.png" },
+      item: { path: join(tmpdir(), "agent-output.png") },
     });
   });
 

@@ -4,18 +4,17 @@ An ambient, room-scale departures board for autonomous coding agents. BIG AGENT 
 
 ![BIG AGENT showing three live coding workstreams in different lifecycle states](docs/images/demo-workstreams.webp)
 
-> **Public alpha:** Linux x86-64 is the currently tested distribution. macOS and Windows builds are not yet validated.
+> **Public alpha:** Linux x64 is locally validated. Windows x64 and macOS (Apple Silicon and Intel) now have native build and test workflows; they remain preview targets until those runs and native checks pass. See [platform support](docs/cross-platform.md).
 
 ## Try it
 
-Download the latest AppImage from [GitHub Releases](https://github.com/marcodenic/BIGAGENT/releases), make it executable, and open it:
+Download the installer for your platform from [GitHub Releases](https://github.com/marcodenic/BIGAGENT/releases) when available:
 
-```bash
-chmod +x "BIG AGENT-0.1.0.AppImage"
-./"BIG AGENT-0.1.0.AppImage"
-```
+- **Linux:** download the `.AppImage`, make it executable, and open it.
+- **Windows:** run the `win-x64.exe` installer.
+- **Mac:** open the `mac-arm64.dmg` (Apple Silicon) or `mac-x64.dmg` (Intel) and move BIG AGENT to Applications.
 
-Alpha builds are currently unsigned. Verify the download against the accompanying `SHA256SUMS` file.
+Alpha builds are unsigned; macOS and Windows may show security warnings. Verify downloads against `SHA256SUMS`. The new workflows prepare platform installers; they do not retroactively add them to existing releases.
 
 The first-run **FIND MY AGENTS** screen detects supported providers. Nothing is added to another application's configuration until you click its setup button; every configured provider also offers **REMOVE INTEGRATION**.
 
@@ -56,7 +55,7 @@ See [PRIVACY.md](PRIVACY.md) for the exact local files used by optional integrat
 
 ## Develop
 
-Requires Node.js 22.12+ and pnpm.
+Requires Node.js 24+ and the pnpm version declared in package.json.
 
 ```bash
 pnpm install
@@ -65,10 +64,28 @@ pnpm test
 pnpm package
 ```
 
-`pnpm package` creates the native package for the host platform; the public alpha release workflow currently publishes the Linux AppImage and SHA-256 checksum.
+`pnpm package` creates native installers for the host platform. CI tests Linux, Windows, and both Mac architectures. Tag builds prepare a draft release with all installers and checksums after every job passes. See [platform development and release checks](docs/cross-platform.md).
 
 Generic JSON events, JSONL streams, OpenTelemetry and ACP are also supported. Start with the [adapter guide](docs/adapters.md), [lifecycle contract](docs/lifecycle.md) or [protocol](docs/protocol.md).
 
 ## Licence
 
 [MIT](LICENSE) — use it, remix it and ship your own version.
+
+## Automatic idle display
+
+While an agent is active, BIG AGENT keeps the display awake. Once system inactivity reaches the screen-off/screensaver timeout, it brings its window forward and enters fullscreen on its existing monitor. User activity restores its previous fullscreen, always-on-top, and minimized/hidden state. Escape dismisses automatic fullscreen until the next idle period. When all agents finish, the display wake request is released immediately so normal power management resumes, even while DONE rows remain visible.
+
+Timeout detection reads Windows power/screen saver settings, macOS power/screen saver settings, GNOME/Cinnamon idle settings, KDE Plasma 6 display settings, or X11 screen saver/DPMS settings. Settings refresh every minute and on power-source changes. Unavailable settings use five minutes; detected disabled timers do not trigger automatic fullscreen. Set `BIG_AGENT_IDLE_SECONDS` to an explicit number of seconds, or `0` to disable automatic fullscreen. This does not disable the existing keep-awake behavior during active work.
+
+Desktop security and window-manager rules still apply. Explicit screen locks are respected where lock detection is available. Wayland can restrict global idle detection, foreground activation, and monitor placement, so automatic presentation is best effort there. macOS and Windows require native validation.
+
+Completed agents remain visible as DONE for 20 seconds, including when other workstreams are still running or a source drops an already completed session. An agent disappearing from a feed without a completion event is not assumed to have succeeded.
+
+## Run recap
+
+Once every participant in an observed run finishes, BIG AGENT shows ALL DONE with the total number of distinct agents and elapsed wall time. The familiar workstream characters celebrate briefly, then settle into happy expressions. Grouped agents share their workstream character with an agent count; names stay in INSPECT. Early finishers remain included after their live rows expire. The recap stays until new work begins and does not keep the screen awake. Waiting, errors, and missing feeds are never treated as successful completion.
+
+SAVE IMAGE downloads an anonymous PNG of the characters, count, duration, and BIG AGENT branding. It excludes project names and activity details. Recaps remain in memory only and reset when the app restarts.
+
+Character colours are generated across the full hue range on each app launch, with bounded brightness and saturation for the dark display. Colours remain stable throughout that launch, including live views, recaps, and exported images.

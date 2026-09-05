@@ -1,3 +1,4 @@
+import { commandActivity } from "./command-activity";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -196,6 +197,10 @@ function updateLiveRollout(path: string) {
         pushLiveItem(state, normalized, timestamp, callId, text(normalized.item.status) !== "completed");
       } else if (responseType === "custom_tool_call_output" && callId) {
         completeLiveCall(state, callId, timestamp);
+      } else if (responseType === "reasoning") {
+        // Activity does not depend on access to reasoning text. Do not read
+        // private/encrypted content from response items.
+        pushLiveItem(state, { itemType: "reasoning", item: { summary: [] } }, timestamp);
       }
       continue;
     }
@@ -220,7 +225,7 @@ function updateLiveRollout(path: string) {
       state.completedAt = timestamp;
       continue;
     }
-    if (eventType !== "item_completed" || !turnId) continue;
+    if (!["item_started", "item_completed"].includes(eventType) || !turnId) continue;
     if (turnId !== state.turnId) {
       state.turnId = turnId;
       state.status = "inProgress";
@@ -229,7 +234,11 @@ function updateLiveRollout(path: string) {
       state.items = [];
     }
     const normalized = normalizeCodexRolloutItem(payload.item);
-    if (!reconcileCompletedRolloutItem(state.items, normalized, timestamp)) pushLiveItem(state, normalized, timestamp);
+    if (eventType === "item_started") pushLiveItem(state, normalized, timestamp, undefined, true);
+    else {
+      if (["commandExecution", "fileChange", "dynamicToolCall", "mcpToolCall"].includes(normalized.itemType) && !normalized.item.status) normalized.item.status = "completed";
+      if (!reconcileCompletedRolloutItem(state.items, normalized, timestamp)) pushLiveItem(state, normalized, timestamp);
+    }
   }
   return state;
 }
@@ -413,7 +422,7 @@ function liveRecordHasContent(record: LiveRolloutItem) {
     && /\bpnpm\s+(?:dev|start|preview)\b|electron-vite|node_modules\/electron|electron\/dist\/electron/.test(command)) {
     return false;
   }
-  if (record.item_type === "reasoning") return Array.isArray(item.summary) && item.summary.some((value) => text(value).trim());
+  if (record.item_type === "reasoning") return true;
   if (record.item_type === "agentMessage") return Boolean(text(item.text).trim());
   if (record.item_type === "userMessage" || record.item_type === "contextCompaction") return false;
   return true;
@@ -482,18 +491,14 @@ function recordEvent(
     detail = plan?.[0] || "Updating the plan";
   } else if (itemType === "reasoning") {
     const summary = Array.isArray(item.summary) ? item.summary.map((value) => text(value)).find((value) => value.trim()) : "";
-    detail = summary || fallbackDetail || "Planning the next step";
+    detail = summary || "Planning the next step";
   } else if (itemType === "commandExecution") {
     const value = text(item.command, "Running command");
-    const testing = ["test", "vitest", "jest", "pytest", "cargo test", "go test"].some((word) => value.includes(word));
-    const building = [" build", "compile", "pnpm build", "cargo build"].some((word) => value.includes(word));
-    const finished = item.status === "completed";
-    // Keep the result visible while the turn continues; the authoritative
-    // needs_follow_up=false lifecycle record closes the turn after its final
-    // response instead of guessing from this individual command.
-    status = finished ? "working" : testing ? "testing" : "command";
-    phase = finished ? "receiving" : testing ? "testing" : "executing";
-    label = finished ? "RESULT RECEIVED" : testing ? "RUNNING TESTS" : building ? "BUILDING" : "RUNNING";
+    const activity = commandActivity(value);
+    const finished = ["completed", "failed", "declined"].includes(text(item.status));
+    status = finished ? "working" : activity.status;
+    phase = finished ? "receiving" : activity.phase;
+    label = finished ? "RESULT RECEIVED" : activity.label;
     detail = value;
     command = value;
     tool = compactToolName(value);

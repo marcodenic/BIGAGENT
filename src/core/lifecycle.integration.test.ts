@@ -12,6 +12,21 @@ function apply(sessions: Record<string, AgentSession>, event: AgentEvent, now: n
 }
 
 describe("end-to-end lifecycle projection", () => {
+  it("leaves RUNNING TESTS on command completion and accepts reasoning without text", () => {
+    let sessions: Record<string, AgentSession> = {};
+    const item = (method: string, item: Record<string, unknown>) => normalize("codex-app-server", {
+      method, params: { threadId: "root", turnId: "turn", item },
+    }, "codex-app-server");
+    sessions = apply(sessions, item("item/started", { id: "cmd", type: "commandExecution", command: "pnpm test" }), 1_000);
+    expect(sessions.root.state.label).toBe("RUNNING TESTS");
+    sessions = apply(sessions, item("item/completed", { id: "cmd", type: "commandExecution", command: "pnpm test", status: "completed" }), 2_000);
+    expect(sessions.root.state.status).toBe("working");
+    sessions = apply(sessions, item("item/started", { id: "reason", type: "reasoning", summary: [] }), 3_000);
+    expect(sessions.root.state).toMatchObject({ status: "thinking", label: "THINKING" });
+    sessions = apply(sessions, item("item/started", { id: "read", type: "commandExecution", command: "cat tests/test.test.ts" }), 4_000);
+    expect(sessions.root.state).toMatchObject({ status: "command", label: "RUNNING" });
+  });
+
   it("separates session availability, transient turn completion, and true session completion", () => {
     let sessions: Record<string, AgentSession> = {};
     sessions = apply(sessions, normalize("hook", { hook_event_name: "SessionStart", session_id: "root", source: "startup" }), 1_000);

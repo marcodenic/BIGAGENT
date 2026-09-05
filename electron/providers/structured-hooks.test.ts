@@ -100,7 +100,7 @@ describe("official structured provider setup", () => {
     const plugin = openCodePluginSource();
 
     expect(command).toContain("ELECTRON_RUN_AS_NODE=1");
-    expect(command).toMatch(process.platform === "win32" ? /exit \/b 0/ : /\|\| true$/);
+    expect(command).toMatch(process.platform === "win32" ? /^powershell\.exe .* -EncodedCommand / : /\|\| true$/);
     expect(plugin).toContain("/sources/opencode");
     expect(plugin).toContain("AbortSignal.timeout(1000)");
     expect(plugin).toContain("catch(() => {})");
@@ -136,3 +136,39 @@ describe("mixed nested hook ownership", () => {
     expect(removeGrokHookSettings(mergeGrokHookSettings(original))).toEqual(retained);
   });
 });
+
+it("generates removable Windows hooks with quoted paths and UTF-8 input", () => {
+  const command = observationBridgeCommand("C:\\Program Files\\BIG AGENT\\BIG AGENT.exe", "C:\\Users\\O'Brien\\big-agent.mjs", "gemini", "win32");
+  expect(command).toMatch(/^powershell\.exe -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/);
+  const source = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
+  expect(source).toContain("O''Brien");
+  expect(source).toContain("UTF8Encoding");
+  expect(source).toContain("ReadToEnd()");
+  expect(source).toContain("exit 0");
+  const settings = mergeGeminiHookSettings({}, command);
+  expect(geminiHooksConfigured(settings, command)).toBe(true);
+  expect(geminiHooksConfigured(removeGeminiHookSettings(settings), command)).toBe(false);
+});
+
+it.runIf(process.platform === "win32")("runs a Windows hook with Unicode input and apostrophes in its path", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { spawn } = await import("node:child_process");
+  const directory = await mkdtemp(join(tmpdir(), "BIG AGENT O'Brien-"));
+  try {
+    const script = join(directory, "big-agent.mjs");
+    await writeFile(script, `let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', data => input += data); process.stdin.on('end', () => { console.log(JSON.stringify({input: JSON.parse(input), args: process.argv.slice(2)})); process.exitCode = 9; });`);
+    const command = observationBridgeCommand(process.execPath, script, "gemini", "win32");
+    const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
+      const child = spawn("powershell.exe", command.split(" ").slice(1), { stdio: ["pipe", "pipe", "pipe"] });
+      let output = "";
+      child.stdout.setEncoding("utf8"); child.stdout.on("data", data => output += data);
+      child.stderr.resume(); child.on("error", reject);
+      child.on("close", code => resolve({ code, output }));
+      child.stdin.end(JSON.stringify({ detail: "日本語 · café" }));
+    });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.output)).toEqual({ input: { detail: "日本語 · café" }, args: ["hook", "gemini"] });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}, 15000);

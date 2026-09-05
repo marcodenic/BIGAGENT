@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
 import type { Server } from "node:http";
 import { dirname, extname, isAbsolute, join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from "electron";
+import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import { codexDesktopSessions, codexSourceSignature, codexSessionStoreAvailable } from "./codex-sessions";
 import { uncoveredCodexEvents } from "./codex-feed";
 import { ClaudeProvider } from "./providers/claude";
@@ -13,8 +13,13 @@ import { TelemetryHub } from "./telemetry/hub";
 import { startOpenCodeSource } from "./telemetry/opencode";
 import { createTelemetryServer, listenTelemetryServer } from "./telemetry/server";
 
+import { IdleDisplay } from "./idle-display";
+
 app.setName("BIG AGENT");
-app.setPath("userData", join(app.getPath("appData"), "BIG AGENT"));
+const smokeTest = process.argv.includes("--smoke-test");
+app.setPath("userData", smokeTest
+  ? process.env.BIG_AGENT_SMOKE_USER_DATA || join(app.getPath("temp"), `big-agent-smoke-${process.pid}`)
+  : join(app.getPath("appData"), "BIG AGENT"));
 
 // Native Vulkan selection is consumed before Electron runs application code,
 // so it must be present on the executable's original command line. Relaunch
@@ -54,7 +59,7 @@ const IMAGE_MIME = new Map([
 let mainWindow: BrowserWindow | null = null;
 let protocolServer: Server | null = null;
 let watcherTimer: NodeJS.Timeout | null = null;
-let wakeLockId: number | null = null;
+let idleDisplay: IdleDisplay | null = null;
 let stopOpenCodeSource: (() => void) | null = null;
 let codexProvider: CodexAppServerProvider | null = null;
 let claudeProvider: ClaudeProvider | null = null;
@@ -79,14 +84,6 @@ function send(channel: string, payload: unknown) {
 function updateProviderHealth(health: ProviderHealth) {
   providerHealth.set(health.id, health);
   send("big-agent:providers", providerSnapshot());
-}
-
-function setScreenAwake(active: boolean) {
-  if (active && wakeLockId === null) wakeLockId = powerSaveBlocker.start("prevent-display-sleep");
-  if (!active && wakeLockId !== null) {
-    if (powerSaveBlocker.isStarted(wakeLockId)) powerSaveBlocker.stop(wakeLockId);
-    wakeLockId = null;
-  }
 }
 
 async function imagePreview(path: string) {
@@ -192,12 +189,12 @@ function registerIpc() {
     return providerSnapshot();
   });
   ipcMain.handle("big-agent:image-preview", (_event, path: string) => imagePreview(path));
-  ipcMain.handle("big-agent:set-screen-awake", (_event, active: boolean) => setScreenAwake(Boolean(active)));
+  ipcMain.handle("big-agent:set-screen-awake", (_event, active: boolean) => idleDisplay?.setActive(Boolean(active)));
   ipcMain.handle("big-agent:toggle-fullscreen", (event) => {
     const window = windowForEvent(event);
-    if (window) window.setFullScreen(!window.isFullScreen());
+    if (window) idleDisplay?.toggleFullscreen(window);
   });
-  ipcMain.handle("big-agent:exit-fullscreen", (event) => windowForEvent(event)?.setFullScreen(false));
+  ipcMain.handle("big-agent:exit-fullscreen", (event) => { idleDisplay?.dismiss(); windowForEvent(event)?.setFullScreen(false); });
 }
 
 async function createWindow() {
@@ -222,7 +219,8 @@ async function createWindow() {
 
   mainWindow.on("maximize", () => mainWindow?.setAlwaysOnTop(true));
   mainWindow.on("unmaximize", () => mainWindow?.setAlwaysOnTop(false));
-  mainWindow.on("closed", () => { mainWindow = null; });
+  mainWindow.on("closed", () => { idleDisplay?.setActive(false); mainWindow = null; });
+  mainWindow.webContents.on("render-process-gone", () => idleDisplay?.setActive(false));
   mainWindow.webContents.on("did-finish-load", () => send("big-agent:providers", providerSnapshot()));
   // Map the native surface before Chromium initializes its Vulkan compositor.
   // A hidden X11 window has no usable geometry for Vulkan surface creation.
@@ -244,15 +242,36 @@ else {
   });
 
   app.whenReady().then(async () => {
-    Menu.setApplicationMenu(null);
+    if (process.platform === "win32") app.setAppUserModelId("com.bigagent.display");
+    Menu.setApplicationMenu(process.platform === "darwin" ? Menu.buildFromTemplate([
+      { role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
+    ]) : null);
+    if (smokeTest) {
+      registerIpc();
+      await createWindow();
+      const passed = await mainWindow!.webContents.executeJavaScript(`new Promise(resolve => {
+        let attempts = 0;
+        const check = async () => {
+          if (document.querySelector('.app') && window.bigAgentDesktop?.platform === 'electron') {
+            try { resolve(Array.isArray(await window.bigAgentDesktop.getSessions())); } catch { resolve(false); }
+          } else if (++attempts >= 100) resolve(false);
+          else setTimeout(check, 100);
+        };
+        check();
+      })`);
+      console.log(passed ? "BIG_AGENT_SMOKE_OK" : "BIG_AGENT_SMOKE_FAILED");
+      app.exit(passed ? 0 : 1);
+      return;
+    }
     codexProvider = new CodexAppServerProvider(telemetryHub, updateProviderHealth);
     claudeProvider = new ClaudeProvider(telemetryHub, updateProviderHealth);
     const bundledBridge = app.isPackaged
       ? join(process.resourcesPath, "bin", "big-agent.mjs")
-      : join(__dirname, "../../scripts/big-agent.mjs");
+      : join(__dirname, "../bridge/big-agent.mjs");
     const bridgeScript = await installObservationBridge(bundledBridge);
     const observationExecutable = process.env.APPIMAGE || process.execPath;
     structuredProviders = createStructuredHookProviders(observationExecutable, bridgeScript, updateProviderHealth);
+    idleDisplay = new IdleDisplay(() => mainWindow);
     registerIpc();
     telemetryHub.onEvent((event) => {
       send("big-agent:event", event);
@@ -289,5 +308,5 @@ app.on("before-quit", () => {
   claudeProvider?.stop();
   structuredProviders.forEach((provider) => provider.stop());
   protocolServer?.close();
-  setScreenAwake(false);
+  idleDisplay?.stop();
 });

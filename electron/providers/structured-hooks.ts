@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { launchDetached, launchInTerminal } from "./launch";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -18,6 +18,7 @@ type HookProviderSpec = {
   setupLabel: string;
   launchLabel: string;
   restartAfterSetup: boolean;
+  desktop?: boolean;
   inspect(command: string): Promise<boolean>;
   install(command: string): Promise<boolean>;
   uninstall(command: string): Promise<void>;
@@ -57,8 +58,10 @@ function object(value: unknown): Json {
 }
 
 function commandMarker(value: unknown, provider: string, expected?: string) {
-  const command = typeof value === "string" ? value : "";
+  let command = typeof value === "string" ? value : "";
   if (expected) return command === expected;
+  const encoded = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)$/.exec(command);
+  if (encoded) command = Buffer.from(encoded[1], "base64").toString("utf16le");
   return /big-agent\.mjs/i.test(command) && new RegExp(`\\bhook\\s+${provider}\\b`, "i").test(command);
 }
 
@@ -261,10 +264,11 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function observationBridgeCommand(executable: string, script: string, provider: string) {
-  if (process.platform === "win32") {
-    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    return `set "ELECTRON_RUN_AS_NODE=1"&& set "BIG_AGENT_URL=${telemetryUrl("/event")}"&& ${quote(executable)} ${quote(script)} hook ${provider} || exit /b 0`;
+export function observationBridgeCommand(executable: string, script: string, provider: string, platform = process.platform) {
+  if (platform === "win32") {
+    const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+    const source = `$ErrorActionPreference = 'Stop'; try { $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $env:ELECTRON_RUN_AS_NODE = '1'; $env:BIG_AGENT_URL = ${quote(telemetryUrl("/event"))}; [Console]::In.ReadToEnd() | & ${quote(executable)} ${quote(script)} hook ${provider} } catch { [Console]::Error.WriteLine('BIG AGENT hook unavailable') }; exit 0`;
+    return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(source, "utf16le").toString("base64")}`;
   }
   return `ELECTRON_RUN_AS_NODE=1 BIG_AGENT_URL=${shellQuote(telemetryUrl("/event"))} ${shellQuote(executable)} ${shellQuote(script)} hook ${provider} || true`;
 }
@@ -275,31 +279,6 @@ async function findFirst(names: string[], candidates: Array<string | undefined>)
     if (binary) return binary;
   }
   return undefined;
-}
-
-async function launchInTerminal(binary: string) {
-  if (process.platform === "darwin") {
-    const child = spawn("open", ["-a", "Terminal", binary], { detached: true, stdio: "ignore" });
-    child.unref();
-    return;
-  }
-  if (process.platform === "win32") {
-    const child = spawn("cmd.exe", ["/c", "start", "", binary], { detached: true, stdio: "ignore" });
-    child.unref();
-    return;
-  }
-  for (const [name, args] of [
-    ["x-terminal-emulator", ["-e", binary]],
-    ["gnome-terminal", ["--", binary]],
-    ["konsole", ["-e", binary]],
-  ] as Array<[string, string[]]>) {
-    const terminal = await findExecutable(name);
-    if (!terminal) continue;
-    const child = spawn(terminal, args, { detached: true, stdio: "ignore" });
-    child.unref();
-    return;
-  }
-  throw new Error("No supported terminal launcher was found");
 }
 
 export class StructuredHookProvider {
@@ -412,7 +391,8 @@ export class StructuredHookProvider {
       return;
     }
     if (!this.binary) throw new Error(`${this.spec.label} was not found`);
-    await launchInTerminal(this.binary);
+    if (this.spec.desktop) await launchDetached(this.binary);
+    else await launchInTerminal(this.binary);
   }
 
   private async refresh() {
@@ -460,7 +440,8 @@ export function createStructuredHookProviders(executable: string, bridgeScript: 
     },
     {
       id: "cursor", label: "CURSOR", transport: "THOUGHT + LIFECYCLE HOOKS", executableNames: ["cursor"],
-      executableCandidates: [process.env.CURSOR_PATH, "/usr/bin/cursor", "/usr/local/bin/cursor", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"],
+      desktop: true,
+      executableCandidates: [process.env.CURSOR_PATH, process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "cursor", "Cursor.exe") : undefined, "/usr/bin/cursor", "/usr/local/bin/cursor", "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"],
       setupLabel: "SET UP CURSOR", launchLabel: "OPEN CURSOR", restartAfterSetup: false,
       ...jsonSetup(cursorPath, cursorHooksConfigured, mergeCursorHookSettings, (value) => removeCursorHookSettings(value)),
     },
@@ -478,7 +459,8 @@ export function createStructuredHookProviders(executable: string, bridgeScript: 
     },
     {
       id: "windsurf", label: "WINDSURF", transport: "CASCADE LIFECYCLE HOOKS", executableNames: ["windsurf"],
-      executableCandidates: [process.env.WINDSURF_PATH, "/usr/bin/windsurf", "/usr/local/bin/windsurf", "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf"],
+      desktop: true,
+      executableCandidates: [process.env.WINDSURF_PATH, process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Programs", "Windsurf", "Windsurf.exe") : undefined, "/usr/bin/windsurf", "/usr/local/bin/windsurf", "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf"],
       setupLabel: "SET UP WINDSURF", launchLabel: "OPEN WINDSURF", restartAfterSetup: true,
       ...jsonSetup(windsurfPath, windsurfHooksConfigured, mergeWindsurfHookSettings, (value) => removeWindsurfHookSettings(value)),
     },

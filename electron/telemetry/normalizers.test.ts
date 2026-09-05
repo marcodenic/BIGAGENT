@@ -329,7 +329,7 @@ describe("telemetry normalization", () => {
     });
   });
 
-  it("does not replace useful narrative with empty Codex item-start placeholders", () => {
+  it("updates activity from empty Codex item-start placeholders", () => {
     const reasoning = normalizeTelemetry(envelope("codex-app-server", {
       method: "item/started",
       params: { threadId: "thread-1", turnId: "turn-1", item: { id: "reason-1", type: "reasoning", summary: [] } },
@@ -339,8 +339,8 @@ describe("telemetry normalization", () => {
       params: { threadId: "thread-1", turnId: "turn-1", item: { id: "message-1", type: "agentMessage" } },
     }, "codex-app-server"));
 
-    expect(reasoning).toEqual([]);
-    expect(message).toEqual([]);
+    expect(reasoning[0]).toMatchObject({ status: "thinking", label: "THINKING", kind: "activity" });
+    expect(message[0]).toMatchObject({ status: "working", label: "RESPONDING", kind: "activity" });
   });
 
   it("uses the Codex workspace directory rather than the task title for the workstream", () => {

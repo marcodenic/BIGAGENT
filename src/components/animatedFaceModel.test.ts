@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { animatedStateForStatus, personalityColor, personalityShape } from "./animatedFaceModel";
+import { animatedStateForStatus, personalityPalette, personalityShape } from "./animatedFaceModel";
 
 describe("animated face app-state mapping", () => {
   it("maps each active work state to a deliberate expression", () => {
@@ -33,10 +33,22 @@ describe("animated face app-state mapping", () => {
 
   it("selects stable, valid visual identities", () => {
     expect(personalityShape(3)).toBe(personalityShape(3));
-    expect(personalityColor(3)).toBe(personalityColor(3));
+    expect(personalityPalette(3)).toEqual(personalityPalette(3));
     expect(personalityShape(-1)).toBe("pebble");
-    expect(personalityColor(-1)).toBe("green");
     expect(new Set(Array.from({ length: 90 }, (_, identity) => personalityShape(identity))).size).toBe(18);
-    expect(new Set(Array.from({ length: 90 }, (_, identity) => personalityColor(identity))).size).toBe(10);
+    const palettes = Array.from({ length: 90 }, (_, identity) => personalityPalette(identity, 42));
+    expect(new Set(palettes.map(palette => palette.flat)).size).toBe(90);
+    expect(personalityPalette(3, 42)).not.toEqual(personalityPalette(3, 43));
+    for (const palette of palettes) {
+      for (const color of Object.values(palette)) {
+        const [hue, saturation, lightness] = color.match(/[\d.]+/g)!.map(Number);
+        expect(hue).toBeGreaterThanOrEqual(0);
+        expect(hue).toBeLessThanOrEqual(360);
+        expect(saturation).toBeGreaterThanOrEqual(70);
+        expect(saturation).toBeLessThanOrEqual(88);
+        expect(lightness).toBeGreaterThanOrEqual(49);
+        expect(lightness).toBeLessThanOrEqual(69);
+      }
+    }
   });
 });

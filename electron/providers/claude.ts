@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
+import spawn from "cross-spawn";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import type { AgentEvent, AgentStatus, EventKind } from "../../src/core/protocol";
 import type { TelemetryHub } from "../telemetry/hub";
+import { launchInTerminal } from "./launch";
 import { findExecutable } from "./executables";
 import type { ProviderHealth, ProviderHealthListener } from "./types";
 import { removeNestedHooks } from "./nested-hooks";
@@ -109,13 +110,13 @@ async function commandOutput(binary: string, args: string[], timeoutMs = 5_000) 
       child.kill("SIGTERM");
       reject(new Error(`${args.join(" ")} timed out`));
     }, timeoutMs);
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    child.stdout!.setEncoding("utf8");
+    child.stderr!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
       stdout += chunk;
       if (stdout.length > 8 * 1024 * 1024) child.kill("SIGTERM");
     });
-    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
+    child.stderr!.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4_000); });
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -413,29 +414,7 @@ export class ClaudeProvider {
 
   private async launch() {
     if (!this.binary) throw new Error("Claude CLI was not found");
-    if (process.platform === "darwin") {
-      const child = spawn("open", ["-a", "Terminal", this.binary], { detached: true, stdio: "ignore" });
-      child.unref();
-      return;
-    }
-    if (process.platform === "win32") {
-      const child = spawn("cmd.exe", ["/c", "start", "", this.binary], { detached: true, stdio: "ignore" });
-      child.unref();
-      return;
-    }
-    const terminals: Array<[string, string[]]> = [
-      ["x-terminal-emulator", ["-e", this.binary]],
-      ["gnome-terminal", ["--", this.binary]],
-      ["konsole", ["-e", this.binary]],
-    ];
-    for (const [name, args] of terminals) {
-      const terminal = await findExecutable(name);
-      if (!terminal) continue;
-      const child = spawn(terminal, args, { detached: true, stdio: "ignore" });
-      child.unref();
-      return;
-    }
-    throw new Error("No supported terminal launcher was found");
+    await launchInTerminal(this.binary);
   }
 
   private publishHealth() {
