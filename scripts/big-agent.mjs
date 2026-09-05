@@ -2,7 +2,7 @@
 /** Local telemetry bridge. No repository contents leave localhost. */
 import { spawn } from "node:child_process";
 
-const configuredUrl = process.env.BIG_AGENT_URL || "http://127.0.0.1:19777/event";
+const configuredUrl = process.env.BIG_AGENT_URL || `http://127.0.0.1:${process.env.BIG_AGENT_PORT || 19777}/event`;
 const serverUrl = new URL(configuredUrl);
 serverUrl.pathname = serverUrl.pathname === "/event" ? "" : serverUrl.pathname.replace(/\/$/, "");
 

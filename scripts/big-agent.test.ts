@@ -12,7 +12,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
 });
 
-async function runHook(payload: Record<string, unknown>, provider = "codex") {
+async function runHook(payload: Record<string, unknown>, provider = "codex", usePort = false) {
   let receivedPath = "";
   let receivedBody = "";
   const server = createServer((request, response) => {
@@ -29,7 +29,7 @@ async function runHook(payload: Record<string, unknown>, provider = "codex") {
   await once(server, "listening");
   const { port } = server.address() as AddressInfo;
   const child = spawn(process.execPath, [bridge, "hook", provider], {
-    env: { ...process.env, BIG_AGENT_URL: `http://127.0.0.1:${port}/event` },
+    env: { ...process.env, BIG_AGENT_URL: usePort ? undefined : `http://127.0.0.1:${port}/event`, BIG_AGENT_PORT: String(port) },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stdout = "";
@@ -60,4 +60,9 @@ describe("Codex hook bridge", () => {
     const result = await runHook({ hook_event_name: "Stop", session_id: "copilot-1" }, "copilot");
     expect(result).toMatchObject({ code: 0, stdout: "", stderr: "", receivedPath: "/hooks/copilot" });
   });
+});
+
+ it("routes hooks using BIG_AGENT_PORT when no explicit URL is provided", async () => {
+  const result = await runHook({ hook_event_name: "BeforeTool", session_id: "gemini-1" }, "gemini", true);
+  expect(result).toMatchObject({ code: 0, stdout: "{}\n", stderr: "", receivedPath: "/hooks/gemini" });
 });

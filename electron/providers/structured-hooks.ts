@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { findExecutable } from "./executables";
 import type { ProviderHealth, ProviderHealthListener, ProviderId } from "./types";
+import { removeNestedHooks } from "./nested-hooks";
+import { isLocalTelemetryUrl, telemetryUrl } from "../telemetry/endpoint";
 
 type Json = Record<string, unknown>;
 
@@ -50,8 +52,6 @@ const WINDSURF_EVENTS = [
   "pre_user_prompt", "post_cascade_response",
 ] as const;
 
-const HOOK_URL = "http://127.0.0.1:19777/hooks";
-
 function object(value: unknown): Json {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
 }
@@ -80,7 +80,7 @@ function containsCopilotCommand(value: unknown, expected?: string) {
 
 function containsGrokHttp(value: unknown) {
   return (Array.isArray(object(value).hooks) ? object(value).hooks as unknown[] : [])
-    .some((entry) => object(entry).type === "http" && object(entry).url === `${HOOK_URL}/grok`);
+    .some((entry) => object(entry).type === "http" && object(entry).url === telemetryUrl("/hooks/grok"));
 }
 
 function mergeEventArrays(settings: unknown, events: readonly string[], entry: (event: string) => unknown, configured: (value: unknown) => boolean): Json {
@@ -144,7 +144,7 @@ export function removeCursorHookSettings(settings: unknown) {
 }
 
 export function mergeGeminiHookSettings(settings: unknown, command: string): Json {
-  return replaceManagedEventArrays(settings, GEMINI_EVENTS, () => ({
+  return replaceManagedEventArrays(removeGeminiHookSettings(settings), GEMINI_EVENTS, () => ({
     hooks: [{ type: "command", command, name: "BIG AGENT", description: "Passive local agent telemetry", timeout: 2_000 }],
   }), (value) => containsNestedCommand(value, "gemini"));
 }
@@ -154,7 +154,7 @@ export function geminiHooksConfigured(settings: unknown, command?: string) {
 }
 
 export function removeGeminiHookSettings(settings: unknown) {
-  return removeEventEntries(settings, GEMINI_EVENTS, (value) => containsNestedCommand(value, "gemini"));
+  return removeNestedHooks(settings, GEMINI_EVENTS, (hook) => commandMarker(hook.command, "gemini"));
 }
 
 export function mergeCopilotHookSettings(settings: unknown, command: string): Json {
@@ -171,11 +171,11 @@ export function removeCopilotHookSettings(settings: unknown) {
 }
 
 export function mergeGrokHookSettings(settings: unknown): Json {
-  const merged = mergeEventArrays(settings, GROK_EVENTS, () => ({ hooks: [{ type: "http", url: `${HOOK_URL}/grok`, timeout: 1 }] }), containsGrokHttp);
+  const merged = mergeEventArrays(removeGrokHookSettings(settings), GROK_EVENTS, () => ({ hooks: [{ type: "http", url: telemetryUrl("/hooks/grok"), timeout: 1 }] }), containsGrokHttp);
   const hooks = { ...object(merged.hooks) };
   const notifications = Array.isArray(hooks.Notification) ? [...hooks.Notification] : [];
   if (!notifications.some((entry) => object(entry).matcher === "idle_prompt" && containsGrokHttp(entry))) {
-    notifications.push({ matcher: "idle_prompt", hooks: [{ type: "http", url: `${HOOK_URL}/grok`, timeout: 1 }] });
+    notifications.push({ matcher: "idle_prompt", hooks: [{ type: "http", url: telemetryUrl("/hooks/grok"), timeout: 1 }] });
   }
   hooks.Notification = notifications;
   return { ...merged, hooks };
@@ -189,18 +189,9 @@ export function grokHooksConfigured(settings: unknown) {
 }
 
 export function removeGrokHookSettings(settings: unknown) {
-  const withoutEvents = removeEventEntries(settings, GROK_EVENTS, containsGrokHttp);
-  const root: Json = { ...withoutEvents };
-  const hooks = { ...object(root.hooks) };
-  const notifications = hooks.Notification;
-  if (Array.isArray(notifications)) {
-    const retained = notifications.filter((entry) => !(object(entry).matcher === "idle_prompt" && containsGrokHttp(entry)));
-    if (retained.length) hooks.Notification = retained;
-    else delete hooks.Notification;
-  }
-  if (Object.keys(hooks).length) root.hooks = hooks;
-  else delete root.hooks;
-  return root;
+  const managed = (hook: Json) => hook.type === "http" && isLocalTelemetryUrl(hook.url, "/hooks/grok");
+  const root = removeNestedHooks(settings, GROK_EVENTS, managed);
+  return removeNestedHooks(root, ["Notification"], (hook, group) => group.matcher === "idle_prompt" && managed(hook));
 }
 
 export function mergeWindsurfHookSettings(settings: unknown, command: string): Json {
@@ -216,7 +207,7 @@ export function removeWindsurfHookSettings(settings: unknown) {
 }
 
 export function openCodePluginSource() {
-  return `/** BIG AGENT passive local telemetry. */\nexport const BigAgentPlugin = async ({ directory }) => ({\n  event: ({ event }) => {\n    void fetch("http://127.0.0.1:19777/sources/opencode", {\n      method: "POST",\n      headers: { "content-type": "application/json" },\n      body: JSON.stringify({ ...event, cwd: directory }),\n      signal: AbortSignal.timeout(1000),\n    }).catch(() => {});\n  },\n});\n`;
+  return `/** BIG AGENT passive local telemetry. */\nexport const BigAgentPlugin = async ({ directory }) => ({\n  event: ({ event }) => {\n    void fetch(${JSON.stringify(telemetryUrl("/sources/opencode"))}, {\n      method: "POST",\n      headers: { "content-type": "application/json" },\n      body: JSON.stringify({ ...event, cwd: directory }),\n      signal: AbortSignal.timeout(1000),\n    }).catch(() => {});\n  },\n});\n`;
 }
 
 async function readText(path: string) {
@@ -253,7 +244,7 @@ function jsonSetup(
     install: async (command: string) => {
       const settings = await readJson(path);
       const next = merge(settings, command);
-      if (!configured(settings, command)) await writeJson(path, next);
+      if (JSON.stringify(settings) !== JSON.stringify(next)) await writeJson(path, next);
       return configured(next, command);
     },
     uninstall: async (command: string) => {
@@ -273,9 +264,9 @@ function shellQuote(value: string) {
 export function observationBridgeCommand(executable: string, script: string, provider: string) {
   if (process.platform === "win32") {
     const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    return `set "ELECTRON_RUN_AS_NODE=1"&& ${quote(executable)} ${quote(script)} hook ${provider} || exit /b 0`;
+    return `set "ELECTRON_RUN_AS_NODE=1"&& set "BIG_AGENT_URL=${telemetryUrl("/event")}"&& ${quote(executable)} ${quote(script)} hook ${provider} || exit /b 0`;
   }
-  return `ELECTRON_RUN_AS_NODE=1 ${shellQuote(executable)} ${shellQuote(script)} hook ${provider} || true`;
+  return `ELECTRON_RUN_AS_NODE=1 BIG_AGENT_URL=${shellQuote(telemetryUrl("/event"))} ${shellQuote(executable)} ${shellQuote(script)} hook ${provider} || true`;
 }
 
 async function findFirst(names: string[], candidates: Array<string | undefined>) {

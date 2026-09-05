@@ -447,7 +447,9 @@ function otlpEvents(envelope: TelemetryEnvelope) {
 }
 
 function opencodeEvents(envelope: TelemetryEnvelope) {
-  const root = object(envelope.payload);
+  const outer = object(envelope.payload);
+  const globalPayload = object(outer.payload);
+  const root = typeof globalPayload.type === "string" ? globalPayload : outer;
   const wrapped = object(root.data);
   const payload = Object.keys(wrapped).length ? wrapped : object(root.properties);
   const rawName = text(root.event, root.type, payload.type) ?? "opencode.event";
@@ -463,11 +465,11 @@ function opencodeEvents(envelope: TelemetryEnvelope) {
     parentSessionId,
     workstreamId: parentSessionId ?? sessionId,
     sessionTitle: text(info.title, payload.title),
-    directory: text(payload.directory, info.directory, root.cwd),
+    directory: text(payload.directory, info.directory, root.cwd, outer.directory),
   };
   const openCodeNaturalId = text(root.id, root.timestamp, part.id);
   const common = { identity: openCodeNaturalId ?? `${rawName}|${sessionId}|${text(info.id)}|${stableToken(JSON.stringify({ status: payload.status, partState: part.state, plan: payload.plan }))}|${envelope.receivedAt}`, meta: { rawEventName: rawName } };
-  if (eventName === "serverconnected") return [];
+  if (["serverconnected", "serverheartbeat"].includes(eventName)) return [];
   if (/permissionasked|permissionupdated/.test(eventName)) return [makeEvent(envelope, basePayload, "approval", "approval.requested", { ...common, phase: "waiting", detail: "Permission required" })];
   if (/questionasked/.test(eventName)) return [makeEvent(envelope, basePayload, "waiting", "input.requested", { ...common, phase: "waiting", detail: "Input required" })];
   if (/sessionerror/.test(eventName)) return [makeEvent(envelope, basePayload, "error", "error", { ...common, phase: "failed", detail: text(payload.error, nested(payload, "error").message) || "OpenCode reported an error" })];

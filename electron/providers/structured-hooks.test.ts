@@ -106,3 +106,33 @@ describe("official structured provider setup", () => {
     expect(plugin).toContain("catch(() => {})");
   });
 });
+
+describe("mixed nested hook ownership", () => {
+  it("preserves Gemini user hooks through command replacement and removal", () => {
+    const user = { type: "command", command: "./audit.sh" };
+    const original = { theme: "dark", hooks: { BeforeTool: [{ matcher: "read_file", hooks: [
+      user, { type: "command", command: "node /tmp/old/big-agent.mjs hook gemini" },
+    ] }] } };
+    const retained = { ...original, hooks: { BeforeTool: [{ matcher: "read_file", hooks: [user] }] } };
+    expect(removeGeminiHookSettings(original)).toEqual(retained);
+    const configured = mergeGeminiHookSettings(original, bridge.replace("provider", "gemini"));
+    expect((configured.hooks as Record<string, unknown[]>).BeforeTool[0]).toEqual(retained.hooks.BeforeTool[0]);
+    expect(removeGeminiHookSettings(configured)).toEqual(retained);
+    expect(original.hooks.BeforeTool[0].hooks).toHaveLength(2);
+  });
+
+  it("preserves Grok user hooks inside lifecycle and idle notification groups", () => {
+    const user = { type: "command", command: "./audit.sh" };
+    const managed = { type: "http", url: "http://127.0.0.1:19777/hooks/grok" };
+    const original = { hooks: {
+      Stop: [{ matcher: "*", hooks: [user, managed] }],
+      Notification: [{ matcher: "idle_prompt", hooks: [managed, user] }],
+    } };
+    const retained = { hooks: {
+      Stop: [{ matcher: "*", hooks: [user] }],
+      Notification: [{ matcher: "idle_prompt", hooks: [user] }],
+    } };
+    expect(removeGrokHookSettings(original)).toEqual(retained);
+    expect(removeGrokHookSettings(mergeGrokHookSettings(original))).toEqual(retained);
+  });
+});

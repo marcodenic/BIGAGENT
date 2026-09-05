@@ -34,3 +34,32 @@ describe("Claude HTTP hook setup", () => {
     });
   });
 });
+
+describe("Claude registry transitions and shared hook groups", () => {
+  it("delivers repeated working and blocked states as new observations", async () => {
+    const { TelemetryHub } = await import("../telemetry/hub");
+    const hub = new TelemetryHub();
+    const observed: Array<string | undefined> = [];
+    hub.onEvent((event) => observed.push(event.status));
+    let previous: string | undefined;
+    for (const state of ["working", "blocked", "working", "blocked", "done"]) {
+      const event = claudeRegistryEvent({ sessionId: "session-1", state, pid: 123 }, previous)!;
+      const envelope = { source: "claude-agents", product: "claude", transport: "agents-json", format: "protocol" as const, payload: event };
+      expect(hub.ingest(envelope)).toHaveLength(1);
+      expect(hub.ingest(envelope)).toHaveLength(0);
+      previous = state;
+    }
+    expect(observed).toEqual(["thinking", "waiting", "thinking", "waiting", "complete"]);
+  });
+
+  it("preserves unrelated hooks and matcher metadata in a mixed group", () => {
+    const user = { type: "command", command: "./audit.sh" };
+    const original = { hooks: { PreToolUse: [{ matcher: "Bash", extra: true, hooks: [user,
+      { type: "http", url: "http://127.0.0.1:19777/hooks/claude" },
+    ] }] } };
+    const expected = { hooks: { PreToolUse: [{ matcher: "Bash", extra: true, hooks: [user] }] } };
+    expect(removeClaudeHookSettings(original)).toEqual(expected);
+    expect(removeClaudeHookSettings(mergeClaudeHookSettings(original))).toEqual(expected);
+    expect(original.hooks.PreToolUse[0].hooks).toHaveLength(2);
+  });
+});

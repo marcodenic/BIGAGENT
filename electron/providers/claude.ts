@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -7,10 +7,12 @@ import type { AgentEvent, AgentStatus, EventKind } from "../../src/core/protocol
 import type { TelemetryHub } from "../telemetry/hub";
 import { findExecutable } from "./executables";
 import type { ProviderHealth, ProviderHealthListener } from "./types";
+import { removeNestedHooks } from "./nested-hooks";
+import { isLocalTelemetryUrl, telemetryUrl } from "../telemetry/endpoint";
 
 type Json = Record<string, unknown>;
 
-const CLAUDE_HOOK_URL = "http://127.0.0.1:19777/hooks/claude";
+const claudeHookUrl = () => telemetryUrl("/hooks/claude");
 export const CLAUDE_HOOK_EVENTS = [
   "SessionStart",
   "SessionEnd",
@@ -41,11 +43,7 @@ function text(...values: unknown[]) {
   return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
 }
 
-function hash(value: string) {
-  return createHash("sha256").update(value).digest("hex").slice(0, 16);
-}
-
-function containsBigAgentHook(value: unknown, url = CLAUDE_HOOK_URL) {
+function containsBigAgentHook(value: unknown, url = claudeHookUrl()) {
   const entry = object(value);
   return (Array.isArray(entry.hooks) ? entry.hooks : []).some((hook) => {
     const config = object(hook);
@@ -53,7 +51,7 @@ function containsBigAgentHook(value: unknown, url = CLAUDE_HOOK_URL) {
   });
 }
 
-export function claudeHooksConfigured(settings: unknown, url = CLAUDE_HOOK_URL) {
+export function claudeHooksConfigured(settings: unknown, url = claudeHookUrl()) {
   const root = object(settings);
   const hooks = object(root.hooks);
   return CLAUDE_HOOK_EVENTS.every((event) => {
@@ -62,8 +60,8 @@ export function claudeHooksConfigured(settings: unknown, url = CLAUDE_HOOK_URL) 
   });
 }
 
-export function mergeClaudeHookSettings(settings: unknown, url = CLAUDE_HOOK_URL) {
-  const root = { ...object(settings) };
+export function mergeClaudeHookSettings(settings: unknown, url = claudeHookUrl()) {
+  const root = removeClaudeHookSettings(settings, url);
   const existingHooks = object(root.hooks);
   const hooks: Json = { ...existingHooks };
   for (const event of CLAUDE_HOOK_EVENTS) {
@@ -79,28 +77,18 @@ export function mergeClaudeHookSettings(settings: unknown, url = CLAUDE_HOOK_URL
   if (root.allowedHttpHookUrls !== undefined) {
     if (!Array.isArray(root.allowedHttpHookUrls)) throw new Error("Claude allowedHttpHookUrls must be an array");
     const allowlist = root.allowedHttpHookUrls.filter((value): value is string => typeof value === "string");
-    if (!allowlist.some((value) => value === CLAUDE_HOOK_URL || value === "http://127.0.0.1:*" || value === "http://localhost:*")) {
-      root.allowedHttpHookUrls = [...allowlist, CLAUDE_HOOK_URL];
+    if (!allowlist.includes(url)) {
+      root.allowedHttpHookUrls = [...allowlist, url];
     }
   }
   return root;
 }
 
-export function removeClaudeHookSettings(settings: unknown, url = CLAUDE_HOOK_URL) {
-  const root: Json = { ...object(settings) };
-  const hooks = { ...object(root.hooks) };
-  for (const event of CLAUDE_HOOK_EVENTS) {
-    const current = hooks[event];
-    if (current === undefined) continue;
-    if (!Array.isArray(current)) throw new Error(`Claude hooks.${event} must be an array`);
-    const retained = current.filter((entry) => !containsBigAgentHook(entry, url));
-    if (retained.length) hooks[event] = retained;
-    else delete hooks[event];
-  }
-  if (Object.keys(hooks).length) root.hooks = hooks;
-  else delete root.hooks;
+export function removeClaudeHookSettings(settings: unknown, url = claudeHookUrl()) {
+  const ownedUrl = (value: unknown) => value === url || isLocalTelemetryUrl(value, "/hooks/claude");
+  const root = removeNestedHooks(settings, CLAUDE_HOOK_EVENTS, (hook) => hook.type === "http" && ownedUrl(hook.url));
   if (Array.isArray(root.allowedHttpHookUrls)) {
-    root.allowedHttpHookUrls = root.allowedHttpHookUrls.filter((value) => value !== url);
+    root.allowedHttpHookUrls = root.allowedHttpHookUrls.filter((value) => !ownedUrl(value));
   }
   return root;
 }
@@ -183,10 +171,11 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
     label = "THINKING";
     detail = text(entry.summary, entry.status) || "Claude is working";
   }
-  const identity = JSON.stringify({ sessionId, rawState, status: entry.status, waitingFor, summary: entry.summary, pid: entry.pid });
   return {
     version: 1,
-    id: `claude-agents-${hash(identity)}`,
+    // Reconciliation already skips unchanged entries. A later return to the
+    // same state is a new observation, not a duplicate of the earlier event.
+    id: `claude-agents-${randomUUID()}`,
     timestamp: new Date().toISOString(),
     kind,
     status,
@@ -289,14 +278,20 @@ export class ClaudeProvider {
     await this.reconcile().catch((error) => {
       this.lastError = error instanceof Error ? error.message : String(error);
     });
-    this.pollTimer = setInterval(() => void this.reconcile(), 3_000);
-    this.pollTimer.unref();
+    this.ensurePolling();
     this.publishHealth();
   }
 
   stop() {
     this.stopped = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = undefined;
+  }
+
+  private ensurePolling() {
+    if (!this.binary || this.stopped || this.pollTimer) return;
+    this.pollTimer = setInterval(() => void this.reconcile(), 3_000);
+    this.pollTimer.unref();
   }
 
   setReceiverListening(listening: boolean) {
@@ -319,6 +314,7 @@ export class ClaudeProvider {
       this.configured = await this.hooksConfigured();
       this.binary = await findExecutable("claude", [process.env.CLAUDE_CLI_PATH]);
       if (this.binary) await this.reconcile();
+      this.ensurePolling();
       this.publishHealth();
       return;
     }
@@ -353,7 +349,7 @@ export class ClaudeProvider {
   private async installHooks() {
     const { settingsPath, settings } = await this.readSettings();
     const merged = mergeClaudeHookSettings(settings);
-    if (!claudeHooksConfigured(settings)) await writeAtomic(settingsPath, merged);
+    if (JSON.stringify(settings) !== JSON.stringify(merged)) await writeAtomic(settingsPath, merged);
     return claudeHooksConfigured(merged);
   }
 

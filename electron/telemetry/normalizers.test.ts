@@ -439,3 +439,22 @@ describe("telemetry normalization", () => {
     expect(hub.health()[0]).toMatchObject({ id: "protocol", state: "live", eventCount: 1 });
   });
 });
+
+describe("OpenCode global event envelopes", () => {
+  it("preserves project, task and lifecycle status in the global SSE wrapper", () => {
+    for (const type of ["busy", "idle", "retry"]) {
+      const payload = { type: "session.status", properties: { sessionID: "open-1", status: { type } } };
+      const wrapped = normalizeTelemetry(envelope("opencode", { directory: "/workspace/project", payload }));
+      const direct = normalizeTelemetry(envelope("opencode", { ...payload, cwd: "/workspace/project" }));
+      expect(wrapped).toEqual(direct);
+      expect(wrapped[0].meta).toMatchObject({ sessionId: "open-1", project: "/workspace/project" });
+    }
+  });
+  it("ignores direct and global connection heartbeats", () => {
+    for (const type of ["server.connected", "server.heartbeat"]) {
+      const payload = { type, properties: {} };
+      expect(normalizeTelemetry(envelope("opencode", payload))).toEqual([]);
+      expect(normalizeTelemetry(envelope("opencode", { payload }))).toEqual([]);
+    }
+  });
+});

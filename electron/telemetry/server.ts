@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { telemetryPort } from "./endpoint";
 import { TelemetryHub } from "./hub";
 import type { TelemetryEnvelope, TelemetryFormat } from "./normalizers";
 
@@ -134,6 +135,6 @@ export function createTelemetryServer(hub: TelemetryHub) {
   });
 }
 
-export function listenTelemetryServer(server: Server, port = Number(process.env.BIG_AGENT_PORT || 19777)) {
+export function listenTelemetryServer(server: Server, port = telemetryPort()) {
   server.listen(port, "127.0.0.1");
 }

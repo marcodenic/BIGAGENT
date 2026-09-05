@@ -38,6 +38,8 @@ Hosted Grok Bot and hosted Copilot jobs are not claimed as local integrations be
 
 Codex session files are monitored automatically, including Desktop versions that use a private App Server. No Codex restart or startup order is required. Live App Server events take priority for the same turn; unrelated desktop tasks remain visible. Set `BIG_AGENT_CODEX_FALLBACK=0` to disable session-file monitoring.
 
+`BIG_AGENT_PORT` selects the local receiver port (default `19777`). Generated hooks and plugins use that port. After changing it, run provider setup again to update existing integrations; unrelated hooks are preserved. Standalone bridge commands also accept `BIG_AGENT_PORT`, with `BIG_AGENT_URL` taking precedence when supplied.
+
 ## Privacy and control
 
 - Activity remains on the machine and in memory; BIG AGENT has no account or cloud upload path.
