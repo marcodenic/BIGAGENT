@@ -24,7 +24,13 @@ it("generates every integration for the configured receiver and migrates old HTT
   expect(removeClaudeHookSettings(oldClaude)).toEqual({ allowedHttpHookUrls: ["https://example.com/audit"] });
   expect(removeGrokHookSettings(oldGrok)).toEqual({});
   for (const provider of ["cursor", "gemini", "copilot", "windsurf"]) {
-    expect(observationBridgeCommand("/opt/electron", "/opt/big-agent.mjs", provider)).toContain("http://127.0.0.1:23456/event");
+    for (const platform of ["linux", "win32"] as const) {
+      const command = observationBridgeCommand("/opt/electron", "/opt/big-agent.mjs", provider, platform);
+      const script = platform === "win32"
+        ? Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le")
+        : command;
+      expect(script).toContain("http://127.0.0.1:23456/event");
+    }
   }
   expect(openCodePluginSource()).toContain("http://127.0.0.1:23456/sources/opencode");
 });

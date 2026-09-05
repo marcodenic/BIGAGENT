@@ -3,6 +3,7 @@ name: Desktop release
 on:
   push:
     tags: ["v*"]
+    branches: ["codex/release-v*"]
   workflow_dispatch:
 
 permissions:
@@ -41,7 +42,10 @@ jobs:
       - run: pnpm package --${{ matrix.arch }} --publish never
       - name: Smoke test packaged app (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm smoke
+        run: |
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          xvfb-run -a pnpm smoke
       - name: Smoke test packaged app (Windows and macOS)
         if: runner.os != 'Linux'
         run: pnpm smoke
@@ -65,6 +69,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const tag = `v${version}`;
+          const ref = process.env.GITHUB_REF_NAME;
+          if (process.env.GITHUB_EVENT_NAME === 'push' && ref !== tag && ref !== `codex/release-${tag}`) {
+            throw new Error(`Release ref ${ref} does not match package version ${tag}`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
+          JS
       - uses: actions/download-artifact@v4
         with:
           pattern: installers-*
@@ -76,9 +94,12 @@ jobs:
           name: all-installers-with-checksums
           path: release/*
       - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push'
         with:
-          draft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: ${{ startsWith(github.ref, 'refs/tags/') }}
+          prerelease: ${{ startsWith(github.ref, 'refs/heads/codex/release-') || contains(github.ref_name, '-') }}
+          body_path: docs/release-notes.md
           generate_release_notes: true
           files: release/*

@@ -38,7 +38,10 @@ jobs:
       - run: pnpm package:dir --${{ matrix.arch }} --publish never
       - name: Smoke test packaged app (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm smoke
+        run: |
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          xvfb-run -a pnpm smoke
       - name: Smoke test packaged app (Windows and macOS)
         if: runner.os != 'Linux'
         run: pnpm smoke

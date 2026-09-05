@@ -34,7 +34,7 @@ Run `node scripts/checksums.mjs release` to hash the installers in a clean relea
 
 CI runs tests, packages the application, and smoke-tests it on four native runners. The Desktop release workflow performs those checks, produces installers, and uploads downloadable workflow artifacts. It can be run manually without publishing a GitHub release.
 
-A `v*` tag creates a **draft** GitHub release only after every platform job succeeds. Review the artifacts and platform checks before publishing the draft. No tag, release, or remote build is created merely by editing these workflows.
+A `v*` tag creates a **draft** GitHub release only after every platform job succeeds. Review the artifacts and platform checks before publishing the draft. For an unsigned preview, pushing a `codex/release-v<package-version>` branch explicitly publishes a prerelease after all four platform jobs pass; the workflow creates the matching tag and attaches installers and checksums. The release ref must match the version in package.json.
 
 The default alpha workflow does not configure signing credentials. macOS and Windows may show security warnings for downloaded unsigned builds. A public distribution should add Apple Developer ID signing and notarization, and Windows signing, before promoting these platforms from preview. Credentials must be supplied through protected CI secrets; they are not included in this repository. Follow [electron-builder's signing documentation](https://www.electron.build/code-signing.html).
 
