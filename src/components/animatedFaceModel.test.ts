@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { animatedStateForStatus, personalityPalette, personalityShape } from "./animatedFaceModel";
+import { animatedStateForStatus, createPersonalityPaletteAllocator, personalityPalette, personalityShape } from "./animatedFaceModel";
 
 describe("animated face app-state mapping", () => {
   it("maps each active work state to a deliberate expression", () => {
@@ -36,9 +36,10 @@ describe("animated face app-state mapping", () => {
     expect(personalityPalette(3)).toEqual(personalityPalette(3));
     expect(personalityShape(-1)).toBe("pebble");
     expect(new Set(Array.from({ length: 90 }, (_, identity) => personalityShape(identity))).size).toBe(18);
-    const palettes = Array.from({ length: 90 }, (_, identity) => personalityPalette(identity, 42));
+    const allocate = createPersonalityPaletteAllocator(42);
+    const palettes = Array.from({ length: 90 }, (_, identity) => allocate(identity));
     expect(new Set(palettes.map(palette => palette.flat)).size).toBe(90);
-    expect(personalityPalette(3, 42)).not.toEqual(personalityPalette(3, 43));
+    expect(allocate(3)).not.toEqual(createPersonalityPaletteAllocator(43)(3));
     for (const palette of palettes) {
       for (const color of Object.values(palette)) {
         const [hue, saturation, lightness] = color.match(/[\d.]+/g)!.map(Number);
@@ -51,4 +52,21 @@ describe("animated face app-state mapping", () => {
       }
     }
   });
+});
+
+
+it("separates a nine-character cast without changing existing identities", () => {
+  for (const seed of [0, 42, 123456, 0xffffffff]) {
+    const allocate = createPersonalityPaletteAllocator(seed);
+    const identities = [3791079978, 3361716846, 3, 4, 5, 6, 7, 8, 9];
+    const palettes = identities.map(allocate);
+    const hues = palettes.map(palette => Number(palette.flat.match(/[\d.]+/)![0]));
+    for (let i = 0; i < hues.length; i++) {
+      for (let j = i + 1; j < hues.length; j++) {
+        const difference = Math.abs(hues[i] - hues[j]);
+        expect(Math.min(difference, 360 - difference)).toBeGreaterThanOrEqual(20);
+      }
+      expect(allocate(identities[i])).toBe(palettes[i]);
+    }
+  }
 });

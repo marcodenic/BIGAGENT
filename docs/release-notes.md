@@ -1,5 +1,6 @@
-# BIG AGENT 0.1.4 preview
+# BIG AGENT 0.1.5 preview
 
+- Random character colours now avoid nearby hues already assigned in the session, while keeping existing identities stable.
 - New transparent character icon for macOS, Windows, and Linux.
 - Larger white activity text when one agent is running, with more room to wrap.
 - Larger text and spacing in the five activity-history rows underneath.

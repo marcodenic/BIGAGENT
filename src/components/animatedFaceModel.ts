@@ -52,14 +52,39 @@ const SHAPES: readonly AnimatedFaceShape[] = ["blob", "pebble", "bean", "egg", "
 // across rerenders, layout changes, and a remounted completion screen.
 const colorSessionSeed = crypto.getRandomValues(new Uint32Array(1))[0];
 
-export function personalityPalette(personality: number, sessionSeed = colorSessionSeed) {
-  const sample = (channel: string) => faceHash(`${sessionSeed}:${personality}:${channel}`) / 0x100000000;
-  const hue = sample("hue") * 360;
-  const saturation = 70 + sample("saturation") * 18;
-  const lightness = 58 + sample("lightness") * 6;
-  const hsl = (light: number) => `hsl(${hue.toFixed(2)} ${saturation.toFixed(2)}% ${light.toFixed(2)}%)`;
-  return { from: hsl(lightness + 5), to: hsl(lightness - 9), flat: hsl(lightness) };
+/** Preserve assigned colours, choosing a well-separated hue for each newcomer. */
+export function createPersonalityPaletteAllocator(sessionSeed: number) {
+  const assigned = new Map<number, { hue: number; palette: { from: string; to: string; flat: string } }>();
+  return (personality: number) => {
+    const existing = assigned.get(personality);
+    if (existing) return existing.palette;
+    const sample = (channel: string) => faceHash(`${sessionSeed}:${personality}:${channel}`) / 0x100000000;
+    let hue = sample("hue") * 360;
+    const hues = [...assigned.values()].map(value => value.hue).sort((a, b) => a - b);
+    const distance = (other: number) => Math.min(Math.abs(hue - other), 360 - Math.abs(hue - other));
+    if (hues.some(other => distance(other) < 45)) {
+      // Split the largest free arc, including the arc crossing red at 0°.
+      // As the cast grows, use the best available separation without recolouring it.
+      let largest = -1;
+      for (let index = 0; index < hues.length; index++) {
+        const start = hues[index];
+        const end = hues[(index + 1) % hues.length] + (index === hues.length - 1 ? 360 : 0);
+        if (end - start > largest) {
+          largest = end - start;
+          hue = (start + largest / 2) % 360;
+        }
+      }
+    }
+    const saturation = 70 + sample("saturation") * 18;
+    const lightness = 58 + sample("lightness") * 6;
+    const hsl = (light: number) => `hsl(${hue.toFixed(2)} ${saturation.toFixed(2)}% ${light.toFixed(2)}%)`;
+    const palette = { from: hsl(lightness + 5), to: hsl(lightness - 9), flat: hsl(lightness) };
+    assigned.set(personality, { hue, palette });
+    return palette;
+  };
 }
+
+export const personalityPalette = createPersonalityPaletteAllocator(colorSessionSeed);
 
 export function personalityShape(personality: number): AnimatedFaceShape {
   return SHAPES[Math.abs(personality) % SHAPES.length];

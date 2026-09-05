@@ -112,4 +112,4 @@ Once every participant in an observed run finishes, BIG AGENT shows ALL DONE wit
 
 SAVE IMAGE downloads an anonymous PNG of the characters, count, duration, and BIG AGENT branding. It excludes project names and activity details. Recaps remain in memory only and reset when the app restarts.
 
-Character colours are generated across the full hue range on each app launch, with bounded brightness and saturation for the dark display. Colours remain stable throughout that launch, including live views, recaps, and exported images.
+Character colours are generated across the full hue range on each app launch, with bounded brightness and saturation for the dark display. New workstreams avoid nearby hues already assigned in the session, using the largest available gap when needed. Colours remain stable throughout that launch, including live views, recaps, and exported images.
