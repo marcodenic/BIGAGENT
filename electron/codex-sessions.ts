@@ -291,6 +291,10 @@ function stateDatabasePath() {
   return join(codexHome(), "state_5.sqlite");
 }
 
+export function codexSessionStoreAvailable() {
+  return existsSync(stateDatabasePath());
+}
+
 function openReadOnly(path: string) {
   return new DatabaseSync(path, { readOnly: true });
 }

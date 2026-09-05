@@ -172,11 +172,29 @@ export class CodexAppServerProvider {
   private standaloneMissing = false;
   private lastEventAt?: string;
   private lastError?: string;
+  private localFeedReady = false;
+  private localActiveSessions = 0;
 
   constructor(private readonly hub: TelemetryHub, private readonly onHealth: ProviderHealthListener) {}
 
+  noteLocalFeed(ready: boolean, activeSessions: number) {
+    this.localFeedReady = ready;
+    this.localActiveSessions = activeSessions;
+    this.publishHealth();
+  }
+
   health(): ProviderHealth {
     const canLaunch = process.platform === "linux";
+    if (this.localFeedReady) {
+      return {
+        id: "codex", label: "CODEX", transport: "LOCAL SESSION FILES",
+        state: "ready", configured: true, connected: true, listening: true,
+        activeSessions: this.localActiveSessions,
+        detail: `Monitoring Codex session files · ${this.localActiveSessions} active task${this.localActiveSessions === 1 ? "" : "s"}`,
+        actions: [{ id: "retry", label: "RECHECK" },
+          ...(canLaunch ? [{ id: "launch" as const, label: "OPEN CODEX" }] : [])],
+      };
+    }
     const state = !this.binary
       ? "unavailable"
       : this.standaloneMissing
@@ -188,7 +206,7 @@ export class CodexAppServerProvider {
         : !this.connected
           ? "connecting"
           : this.desktopRunning && !this.desktopShared
-            ? "needs-restart"
+            ? "error"
             : "ready";
     const detail = !this.binary
       ? "Codex CLI was not found"
@@ -199,7 +217,7 @@ export class CodexAppServerProvider {
       : this.lastError && !this.connected
         ? this.lastError
         : this.connected && this.desktopRunning && !this.desktopShared
-          ? "App Server connected; restart Codex once to join the shared feed"
+          ? "Codex is using a separate server; local session monitoring is unavailable"
           : this.connected && this.desktopRunning
             ? `Shared feed connected · ${this.subscribed.size} loaded thread${this.subscribed.size === 1 ? "" : "s"}`
             : this.connected
@@ -209,7 +227,7 @@ export class CodexAppServerProvider {
     if (this.standaloneMissing) actions.push({ id: "setup", label: "INSTALL CODEX CLI" });
     else if (!this.configured && canLaunch) actions.push({ id: "setup", label: "SET UP CODEX" });
     if (this.binary && !this.connected && !this.standaloneMissing) actions.push({ id: "retry", label: "RETRY" });
-    if (this.binary && canLaunch && !this.standaloneMissing) actions.push({ id: "launch", label: this.desktopRunning && !this.desktopShared ? "RESTART CODEX" : "OPEN CODEX" });
+    if (canLaunch) actions.push({ id: "launch", label: "OPEN CODEX" });
     if (this.configured && canLaunch) actions.push({ id: "remove", label: "REMOVE INTEGRATION" });
     return {
       id: "codex",
@@ -321,21 +339,12 @@ export class CodexAppServerProvider {
   }
 
   private async launchDesktop() {
-    if (!this.binary) throw new Error("Codex CLI was not found");
-    await run(this.binary, ["app-server", "daemon", "start"]);
-    const processes = await linuxDesktopProcesses();
-    for (const processInfo of processes.filter((entry) => !entry.shared)) {
-      try { process.kill(processInfo.pid, "SIGTERM"); } catch { /* Already exited. */ }
-    }
-    if (processes.some((entry) => !entry.shared)) {
-      for (let attempt = 0; attempt < 40 && (await linuxDesktopProcesses()).some((entry) => !entry.shared); attempt += 1) await delay(100);
-    }
     const launcher = await findExecutable("chatgpt", [process.platform === "linux" ? "/usr/bin/chatgpt" : undefined]);
     if (!launcher) throw new Error("Codex desktop launcher was not found");
     const child = spawn(launcher, [], {
       detached: true,
       stdio: "ignore",
-      env: { ...process.env, CODEX_APP_SERVER_USE_LOCAL_DAEMON: "1" },
+      env: process.env,
     });
     child.unref();
     await delay(500);

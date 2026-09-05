@@ -3,7 +3,8 @@ import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
 import type { Server } from "node:http";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from "electron";
-import { codexDesktopSessions, codexDesktopSnapshot, codexSourceSignature } from "./codex-sessions";
+import { codexDesktopSessions, codexSourceSignature, codexSessionStoreAvailable } from "./codex-sessions";
+import { uncoveredCodexEvents } from "./codex-feed";
 import { ClaudeProvider } from "./providers/claude";
 import { CodexAppServerProvider } from "./providers/codex-app-server";
 import { createStructuredHookProviders, type StructuredHookProvider } from "./providers/structured-hooks";
@@ -62,7 +63,8 @@ let previousSignature = "";
 let previousSessions = "";
 let safetyRefreshAt = 0;
 const telemetryHub = new TelemetryHub();
-const allowCodexFallback = process.env.BIG_AGENT_CODEX_FALLBACK === "1";
+const allowCodexFallback = process.env.BIG_AGENT_CODEX_FALLBACK !== "0";
+let localCodexEvents: ReturnType<typeof codexDesktopSessions> = [];
 const providerHealth = new Map<ProviderId, ProviderHealth>();
 const providerOrder: ProviderId[] = ["codex", "claude", "grok", "cursor", "gemini", "copilot", "windsurf", "opencode"];
 
@@ -99,11 +101,16 @@ async function imagePreview(path: string) {
 
 function refreshSessions(force = false) {
   if (!allowCodexFallback) return;
-  const telemetryAuthoritative = hasCodexTelemetry();
-  const signature = telemetryAuthoritative ? "telemetry-authoritative" : codexSourceSignature();
   const now = Date.now();
-  if (!force && signature === previousSignature && now < safetyRefreshAt) return;
   try {
+    const signature = codexSourceSignature();
+    if (!force && signature === previousSignature && now < safetyRefreshAt) return;
+    localCodexEvents = codexDesktopSessions();
+    const latest = new Map(localCodexEvents.map((event) => [
+      (event.meta as Record<string, unknown>).threadId, event,
+    ]));
+    codexProvider?.noteLocalFeed(codexSessionStoreAvailable(), [...latest.values()]
+      .filter((event) => event.status !== "complete" && event.status !== "error").length);
     const sessions = codexFallbackEvents();
     telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);
     const serialized = JSON.stringify(sessions);
@@ -113,11 +120,8 @@ function refreshSessions(force = false) {
     }
     previousSignature = signature;
     safetyRefreshAt = now + 15_000;
-    if (telemetryAuthoritative && watcherTimer) {
-      clearInterval(watcherTimer);
-      watcherTimer = null;
-    }
   } catch (error) {
+    codexProvider?.noteLocalFeed(false, 0);
     telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", "error", error instanceof Error ? error.message : String(error));
     console.error("Codex session refresh failed:", error);
   }
@@ -130,19 +134,12 @@ function startSessionWatcher() {
   watcherTimer.unref();
 }
 
-function hasCodexTelemetry() {
-  return Object.keys(telemetryHub.eventsBySource()).some((source) =>
-    source === "codex-hooks" || source === "codex-app-server" || source === "codex-json"
-  );
-}
-
 function codexFallbackEvents() {
-  // Rollout parsing is only a bootstrap fallback. As soon as Codex emits a
-  // supported lifecycle event, that feed is authoritative for this process.
-  // Keeping both sources visible lets an unrelated stale rollout survive even
-  // though the live feed correctly completed the current turn.
-  if (!allowCodexFallback || hasCodexTelemetry()) return [];
-  return codexDesktopSessions().map((event) => ({
+  if (!allowCodexFallback) return [];
+  const live = Object.entries(telemetryHub.eventsBySource())
+    .filter(([source]) => ["codex-hooks", "codex-app-server", "codex-json"].includes(source))
+    .flatMap(([, events]) => events);
+  return uncoveredCodexEvents(localCodexEvents, live).map((event) => ({
     ...event,
     meta: { ...(event.meta && typeof event.meta === "object" ? event.meta : {}), source: "codex-desktop-fallback", product: "codex", transport: "rollout-jsonl-fallback" },
   }));
@@ -181,12 +178,15 @@ function windowForEvent(event: Electron.IpcMainInvokeEvent) {
 
 function registerIpc() {
   ipcMain.handle("big-agent:get-sessions", () => allSessionEvents());
-  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: providerSnapshot(), legacy: allowCodexFallback ? codexDesktopSnapshot() : null }));
+  ipcMain.handle("big-agent:get-snapshot", () => ({ events: allSessionEvents(), sources: telemetryHub.health(), providers: providerSnapshot(), legacy: null }));
   ipcMain.handle("big-agent:get-providers", () => providerSnapshot());
   ipcMain.handle("big-agent:provider-action", async (_event, provider: ProviderId, action: "setup" | "retry" | "launch" | "remove") => {
     if (!providerOrder.includes(provider)) throw new Error("Unknown provider");
     if (!(["setup", "retry", "launch", "remove"] as string[]).includes(action)) throw new Error("Unknown provider action");
-    if (provider === "codex") await codexProvider?.action(action);
+    if (provider === "codex") {
+      await codexProvider?.action(action);
+      refreshSessions(true);
+    }
     else if (provider === "claude") await claudeProvider?.action(action);
     else await structuredProviders.find((candidate) => candidate.health().id === provider)?.action(action);
     return providerSnapshot();
@@ -260,8 +260,8 @@ else {
       const structured = structuredProviders.find((provider) => provider.health().id === event.meta?.product);
       structured?.noteEvent();
       if (event.meta?.product === "codex" && event.meta?.source !== "codex-desktop-fallback") {
-        // Clear the renderer's authoritative fallback snapshot immediately;
-        // source priority alone cannot remove a stale row with a different id.
+        // Hand matching turns to the live source without hiding other desktop
+        // tasks that are running on a separate server.
         refreshSessions(true);
       }
     });

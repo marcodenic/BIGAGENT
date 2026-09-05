@@ -23,9 +23,9 @@ The first-run **FIND MY AGENTS** screen detects supported providers. Nothing is 
 
 ## Supported providers
 
-| Provider | Official observation source |
+| Provider | Observation source |
 | --- | --- |
-| Codex | App Server daemon |
+| Codex | Local session files + App Server daemon |
 | Claude Code | HTTP hooks + agent registry |
 | Grok Build | HTTP lifecycle hooks |
 | Cursor | Thought + lifecycle hooks |
@@ -35,6 +35,8 @@ The first-run **FIND MY AGENTS** screen detects supported providers. Nothing is 
 | OpenCode | Global plugin + SSE |
 
 Hosted Grok Bot and hosted Copilot jobs are not claimed as local integrations because they do not expose an equivalent localhost event feed.
+
+Codex session files are monitored automatically, including Desktop versions that use a private App Server. No Codex restart or startup order is required. Live App Server events take priority for the same turn; unrelated desktop tasks remain visible. Set `BIG_AGENT_CODEX_FALLBACK=0` to disable session-file monitoring.
 
 ## Privacy and control
 

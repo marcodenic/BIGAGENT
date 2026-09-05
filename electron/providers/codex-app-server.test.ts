@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { sharedCodexDesktopEntry, unixSocketPeerInodes, unsharedCodexDesktopEntry } from "./codex-app-server";
+import { CodexAppServerProvider, sharedCodexDesktopEntry, unixSocketPeerInodes, unsharedCodexDesktopEntry } from "./codex-app-server";
+
+import { TelemetryHub } from "../telemetry/hub";
 
 describe("Codex shared App Server desktop setup", () => {
   it("adds the daemon environment without discarding desktop metadata", () => {
@@ -22,5 +24,18 @@ describe("Codex shared App Server desktop setup", () => {
     ].join("\n");
 
     expect([...unixSocketPeerInodes(output, socket)]).toEqual(["3624255", "3638515"]);
+  });
+});
+
+ describe("Codex local session monitoring", () => {
+  it("is ready without a shared server or standalone CLI and never asks for restart", () => {
+    const provider = new CodexAppServerProvider(new TelemetryHub(), () => {});
+    provider.noteLocalFeed(true, 2);
+    expect(provider.health()).toMatchObject({ state: "ready", transport: "LOCAL SESSION FILES", activeSessions: 2 });
+    expect(provider.health().actions?.some((action) => /RESTART|INSTALL/.test(action.label))).toBe(false);
+    provider.noteLocalFeed(true, 0);
+    expect(provider.health()).toMatchObject({ state: "ready", activeSessions: 0 });
+    provider.noteLocalFeed(false, 0);
+    expect(provider.health().state).not.toBe("ready");
   });
 });
