@@ -96,11 +96,11 @@ describe("official structured provider setup", () => {
   });
 
   it("uses a bounded fail-open bridge and OpenCode global event plugin", () => {
-    const command = observationBridgeCommand("/opt/BIG AGENT/electron", "/opt/BIG AGENT/big-agent.mjs", "cursor");
+    const command = observationBridgeCommand("/opt/BIG AGENT/electron", "/opt/BIG AGENT/big-agent.mjs", "cursor", "linux");
     const plugin = openCodePluginSource();
 
     expect(command).toContain("ELECTRON_RUN_AS_NODE=1");
-    expect(command).toMatch(process.platform === "win32" ? /^powershell\.exe .* -EncodedCommand / : /\|\| true$/);
+    expect(command).toMatch(/\|\| true$/);
     expect(plugin).toContain("/sources/opencode");
     expect(plugin).toContain("AbortSignal.timeout(1000)");
     expect(plugin).toContain("catch(() => {})");
@@ -142,6 +142,7 @@ it("generates removable Windows hooks with quoted paths and UTF-8 input", () => 
   expect(command).toMatch(/^powershell\.exe -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/);
   const source = Buffer.from(command.split(" ").at(-1)!, "base64").toString("utf16le");
   expect(source).toContain("O''Brien");
+  expect(source).toContain("$env:ELECTRON_RUN_AS_NODE = '1'");
   expect(source).toContain("UTF8Encoding");
   expect(source).toContain("ReadToEnd()");
   expect(source).toContain("exit 0");
