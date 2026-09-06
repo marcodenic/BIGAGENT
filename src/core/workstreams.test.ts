@@ -7,6 +7,16 @@ function event(sessionId: string, threadId: string, status: "thinking" | "testin
 }
 
 describe("workstream projection", () => {
+  it("keeps idle parents and nested children together without merging independent tasks", () => {
+    let sessions = {};
+    for (const [id, parent, status] of [["root", "", "idle"], ["child", "root", "thinking"], ["grandchild", "child", "testing"], ["other", "", "thinking"]] as const) {
+      sessions = applySessionEvent(sessions, normalizeSimpleEvent({ status, meta: { sessionId: id, workstreamId: parent || id, parentSessionId: parent } }, id), 1000);
+    }
+    const groups = groupWorkstreams(sessions, 1000);
+    expect(groups).toHaveLength(2);
+    expect(groups.find(group => group.id === "root")?.agents.map(agent => agent.id).sort()).toEqual(["child", "grandchild", "root"]);
+    expect(projectWorkstreamPresentation(groups, 1000).liveAgents).toHaveLength(3);
+  });
   it("expires stopped sessions after 20 seconds, including replay after restart", () => {
     const stopped = normalizeSimpleEvent({ status: "stopped", meta: { sessionId: "stop", turnId: "turn", completedAtMs: 1000 } }, "stop-event");
     let sessions = replaceSessionSource({}, "codex", [stopped], 1000);
@@ -136,7 +146,7 @@ describe("workstream projection", () => {
     sessions = applySessionEvent(sessions, idle, 2_000, "codex-hooks");
     const board = activeBoardWorkstreams(groupWorkstreams(sessions, 2_000));
     expect(board).toHaveLength(1);
-    expect(board[0].agents.map((agent) => [agent.id, agent.state.status])).toEqual([["child", "complete"]]);
+    expect(board[0].agents.map((agent) => [agent.id, agent.state.status])).toEqual([["child", "complete"], ["parent", "idle"]]);
   });
 
   it("does not present turn-idle as completed work", () => {

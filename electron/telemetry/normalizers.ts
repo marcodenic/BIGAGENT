@@ -121,6 +121,9 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     project: text(project.name, payload.project_name, payload.projectName, cwd),
     sessionTitle: text(payload.session_title, payload.sessionTitle, payload.custom_title, payload.customTitle, session.title, thread.title, extra.sessionTitle),
     agentName: text(agent.name, payload.agent_name, payload.agentName, extra.agentName, envelope.product),
+    agentRole: text(payload.agentRole, payload.agent_role, agent.role, extra.agentRole),
+    agentPath: text(payload.agentPath, payload.agent_path, extra.agentPath),
+    agentTaskTitle: text(payload.agentTaskTitle, extra.agentTaskTitle),
     modelProvider: text(model.provider, payload.model_provider, payload.modelProvider, extra.modelProvider, envelope.product),
     model: text(model.id, model.name, payload.model_id, payload.modelId, payload.model_name, payload.modelName, payload.model, extra.model),
     effort: text(payload.reasoning_effort, payload.reasoningEffort, effort?.value, extra.effort),
@@ -558,6 +561,8 @@ function codexEvents(envelope: TelemetryEnvelope) {
   const eventType = key(rawType);
   const itemType = key(item.type);
   const thread = object(params.thread || result.thread);
+  // Approval reviewers are internal helpers, not user-visible coding agents.
+  if (text(thread.model, result.model) === "codex-auto-review") return [];
   const turn = object(params.turn || result.turn);
   const threadCwd = text(thread.cwd, params.cwd);
   const basePayload = {
@@ -574,6 +579,9 @@ function codexEvents(envelope: TelemetryEnvelope) {
     sessionTitle: text(thread.name),
     cwd: threadCwd,
     agentName: text(thread.agentNickname, thread.agentRole),
+    agentRole: text(thread.agentRole),
+    agentPath: text(thread.agentPath),
+    agentTaskTitle: text(thread.name),
     modelProvider: text(thread.modelProvider),
     model: text(thread.model, result.model),
     reasoningEffort: text(thread.reasoningEffort, result.reasoningEffort),

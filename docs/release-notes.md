@@ -1,9 +1,11 @@
-# BIG AGENT 0.1.7 preview
+# BIG AGENT 0.1.8 preview
 
-- Thinking, searching, and general work each rotate through three character animations every 4–7 seconds, with staggered timing for each character.
-- Animation rotation pauses offscreen and respects reduced-motion preferences. Specific actions and attention signals keep their clear expressions.
-- User-stopped Codex sessions now show a neutral STOPPED state instead of an error, then disappear after 20 seconds.
-- Stopped-session expiry uses the original stop time, so refreshing or restarting does not bring old stopped sessions back. Genuine errors remain visible.
+- Subagents now appear as selectable baby bots inside their parent task. Larger boards keep each family together instead of splitting children into separate session tiles.
+- Baby bots share their parent's shape, use stable colours based on declared roles, and show their nickname, readable assignment, model, and reasoning effort.
+- Internal Codex approval reviewers no longer appear as extra working or completed agents.
+- Single-task layouts scale characters, activity text, and spacing to the available screen area. Team entries adapt to smaller windows and crowded boards, with scrolling and expansion for additional detail.
+- A compact status and control dock replaces the full-width header and footer. Connections, fullscreen, inspection, privacy, and detailed feed status remain accessible.
+- Save image now opens a native save dialog for the anonymous completion PNG and confirms the saved path or cancellation.
 
 ## Mac download
 

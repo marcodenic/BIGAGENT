@@ -8,10 +8,14 @@ import { normalizeCodexRolloutItem, normalizeCodexToolCall, reconcileCodexTurnLi
 
 type JsonObject = Record<string, unknown>;
 type ThreadDisplayMeta = {
+  parentSessionId: string;
   workstreamId: string;
   workstreamName: string;
   taskName: string;
   agentName: string;
+  agentRole: string;
+  agentPath: string;
+  agentTaskTitle: string;
   modelProvider: string;
   model: string;
   reasoningEffort: string;
@@ -46,6 +50,7 @@ type StateThreadRow = {
   reasoning_effort: string | null;
   agent_nickname: string | null;
   agent_role: string | null;
+  agent_path: string | null;
 };
 
 type AgentLoopExitRow = { thread_id: string; exited_at: number };
@@ -403,11 +408,13 @@ function recentRolloutThreads() {
   const database = tryOpenReadOnly(stateDatabasePath());
   if (!database) return [];
   try {
+    const hasAgentPath = queryAll<{ name: string }>(database, "PRAGMA table_info(threads)").some(column => column.name === "agent_path");
     const rows = queryAll<StateThreadRow>(database, `
       SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
-        reasoning_effort, agent_nickname, agent_role
+        reasoning_effort, agent_nickname, agent_role, ${hasAgentPath ? "agent_path" : "NULL AS agent_path"}
       FROM threads
       WHERE archived = 0 AND rollout_path IS NOT NULL AND rollout_path != ''
+        AND (model IS NULL OR model != 'codex-auto-review')
       ORDER BY updated_at_ms DESC
       LIMIT 24
     `);
@@ -451,6 +458,7 @@ function threadDisplayMeta(
   thread: StateThreadRow,
 ): ThreadDisplayMeta {
   let workstreamId = thread.id;
+  let parentSessionId = "";
   for (let depth = 0; depth < 12; depth += 1) {
     const edge = queryOne<{ parent_thread_id: string }>(
       stateDatabase,
@@ -458,6 +466,7 @@ function threadDisplayMeta(
       workstreamId,
     );
     if (!edge?.parent_thread_id) break;
+    if (depth === 0) parentSessionId = edge.parent_thread_id;
     workstreamId = edge.parent_thread_id;
   }
 
@@ -472,10 +481,14 @@ function threadDisplayMeta(
   const taskName = root?.title || names.get(workstreamId) || `Codex ${workstreamId.slice(0, 8)}`;
   const workstreamName = basename(root?.cwd || thread.cwd || "") || taskName;
   return {
+    parentSessionId,
     workstreamId,
     workstreamName,
     taskName,
     agentName: thread.agent_nickname || thread.agent_role || "Codex agent",
+    agentRole: thread.agent_role || "",
+    agentPath: thread.agent_path || "",
+    agentTaskTitle: parentSessionId ? thread.title : "",
     modelProvider: thread.model_provider || root?.model_provider || "unknown",
     model: thread.model || root?.model || "unknown model",
     reasoningEffort: thread.reasoning_effort || root?.reasoning_effort || "",
@@ -692,11 +705,16 @@ function recordEvent(
       sessionId: thread,
       turnId: turn,
       threadId: thread,
+      parentSessionId: display.parentSessionId,
+      sessionTitle: display.taskName,
       workstreamId: display.workstreamId,
       workstreamName: display.workstreamName,
       taskName: display.taskName,
       sessionName: display.agentName,
       agentName: display.agentName,
+      agentRole: display.agentRole,
+      agentPath: display.agentPath,
+      agentTaskTitle: display.agentTaskTitle,
       modelProvider: display.modelProvider,
       model: display.model,
       reasoningEffort: display.reasoningEffort,

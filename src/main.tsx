@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { faceHash } from "./components/animatedFaceModel";
+import { subagentAssignment, subagentColor } from "./components/subagentPresentation";
+import { faceHash, personalityShape } from "./components/animatedFaceModel";
 import { FaceVisual } from "./components/FaceVisual";
 import { codexAdapter, genericJsonlAdapter } from "./core/adapters";
 import { desktopApi, exitAppFullscreen, toggleAppFullscreen } from "./desktop";
@@ -460,33 +461,54 @@ function WorkstreamElapsed({ workstream }: { workstream: Workstream }) {
   return <time>{formatElapsed(workstreamElapsed(workstream, now))}</time>;
 }
 
+function AgentTeam({ agents, privacy, family }: { agents: AgentSession[]; privacy: boolean; family: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [selectedId, setSelectedId] = useState("");
+  const selected = agents.find(agent => agent.id === selectedId);
+  const visible = expanded ? agents : agents.slice(0, 3);
+  const finished = agents.filter(agent => agent.state.status === "complete" || agent.state.status === "stopped").length;
+  return <section className="agent-team" aria-label="Subagents">
+    <div className="team-heading"><span>TEAM · {agents.length - finished} ACTIVE{finished ? ` · ${finished} FINISHED` : ""}</span>
+      {agents.length > 3 && <button onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "LESS" : `+${agents.length - 3} MORE`}</button>}
+    </div>
+    <div className="team-members">{visible.map(agent => <button key={agent.id} className={`team-member ${agent.state.attention ? "team-attention" : ""}`} aria-pressed={selectedId === agent.id} onClick={() => setSelectedId(selectedId === agent.id ? "" : agent.id)}>
+      <span className="baby-bot"><FaceVisual status={agent.state.status} phase={agent.state.phase} label={agent.state.label} seed={faceHash(agent.id)} personality={faceHash(agent.id)} shape={personalityShape(family)} color={subagentColor(agent)} attention={agent.state.attention} /></span>
+      <span className="team-copy"><b>{privacy ? "SUBAGENT" : agent.agentName}</b>{!privacy && subagentAssignment(agent) && <span className="team-assignment" title={subagentAssignment(agent)}>{subagentAssignment(agent)}</span>}<span className="team-status">{agent.state.label}</span><ModelIdentity agents={[agent]} /></span>
+    </button>)}</div>
+    {selected && <div className="team-detail"><div><b>{privacy ? "SUBAGENT" : selected.agentName}</b><button onClick={() => setSelectedId("")} aria-label="Close subagent activity">×</button></div>{!privacy && <p className="team-assignment">{subagentAssignment(selected)}{selected.agentRole ? ` · Role: ${selected.agentRole}` : ""}</p>}<p>{privacy ? "Activity hidden" : selected.state.detail}</p><ol>{activitySteps(selected, privacy, 3).map((step, index) => <li key={index}>{headlineDetail(step)}</li>)}</ol></div>}
+  </section>;
+}
+
 const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
-  const visibleAgents = workstream.agents.slice(0, agentLimit);
-  const extra = workstream.agents.length - visibleAgents.length;
+  const children = workstream.agents.filter(agent => Boolean(agent.parentSessionId));
+  const parents = workstream.agents.filter(agent => !agent.parentSessionId);
+  const visibleAgents = parents.slice(0, agentLimit);
+  const extra = parents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
-  const agentNames = [...new Set(workstream.agents.map((agent) => agent.agentName))];
+  const agentNames = [...new Set(parents.map((agent) => agent.agentName))];
   const agentLabel = `${agentNames[0] ?? "AGENT"}${agentNames.length > 1 ? ` +${agentNames.length - 1}` : ""}`;
   const rootAgents = workstream.agents.filter((agent) => !agent.parentSessionId);
   const titledAgents = rootAgents.some((agent) => agent.sessionTitle) ? rootAgents : workstream.agents;
   const sessionTitles = [...new Set(titledAgents.map((agent) => displayText(agent.sessionTitle, "")).filter((title) => title && title.toLowerCase() !== workstream.name.toLowerCase()))];
   const sessionTitle = privacy || !sessionTitles.length ? "" : `${sessionTitles[0]}${sessionTitles.length > 1 ? ` +${sessionTitles.length - 1}` : ""}`;
-  return <article className={`workstream status-${workstream.status} ${workstream.agents.length === 1 ? "single-agent" : ""} ${workstream.attention ? "needs-attention" : ""}`}>
+  return <article className={`workstream status-${workstream.status} ${children.length ? "has-team" : "single-agent"} ${workstream.attention ? "needs-attention" : ""}`}>
     <div className="workstream-identity">
       <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
       {sessionTitle && <p className="session-title" title={sessionTitles.join(" + ")}>{sessionTitle}</p>}
       <div className="identity-meta">
-        <div className="workstream-dots" aria-label={`${workstream.agents.length} agents`}>
-          {workstream.agents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
+        <div className="workstream-dots" aria-label={`${parents.length} lead agents`}>
+          {parents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
         </div>
         <span className="agent-names" title={agentNames.join(" + ")}>{agentLabel}</span>
-        <ModelIdentity agents={workstream.agents} />
+        <ModelIdentity agents={parents.length ? parents : workstream.agents.slice(0, 1)} />
       </div>
     </div>
-    <FaceVisual status={workstream.status} phase={workstream.phase} label={workstream.label} seed={personality} personality={personality} attention={workstream.attention} />
+    <FaceVisual status={parents[0]?.state.status ?? workstream.status} phase={parents[0]?.state.phase ?? workstream.phase} label={workstream.label} seed={personality} personality={personality} attention={workstream.attention} />
     <ContentFittedActivity>
       <FittedStateLabel label={workstream.label} />
       <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
       {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
+      {children.length > 0 && <AgentTeam agents={children} privacy={privacy} family={personality} />}
     </ContentFittedActivity>
     <div className="workstream-visual"><WorkstreamElapsed workstream={workstream} /><AgentPreview path={previewPath} privacy={privacy} /></div>
   </article>;
@@ -560,6 +582,18 @@ function OperationalReady() {
   </section>;
 }
 
+function ControlIcon({ name }: { name: "connections" | "fullscreen" | "inspect" | "lock" | "unlock" | "status" }) {
+  const paths = {
+    connections: "M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4",
+    fullscreen: "M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5",
+    inspect: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6",
+    lock: "M6 10h12v11H6V10Zm2 0V6a4 4 0 0 1 8 0v4",
+    unlock: "M6 10h12v11H6V10Zm2 0V6a4 4 0 0 1 8 0",
+    status: "M3 12h4l3-8 4 16 3-8h4",
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
+}
+
 function App() {
   const [runState, setRunState] = useState<{ sessions: Record<string, AgentSession>; recap: RunRecap | null }>({ sessions: {}, recap: null });
   const { sessions, recap } = runState;
@@ -587,12 +621,9 @@ function App() {
     recentlyDone,
     boardWorkstreams,
   } = useMemo(() => projectWorkstreamPresentation(workstreams, now), [workstreams, now]);
-  const boardAgents = boardWorkstreams.flatMap((workstream) => workstream.agents);
-  const useAgentTiles = boardAgents.length > 5;
-  const displayWorkstreams = useAgentTiles
-    ? boardWorkstreams.flatMap((workstream) => workstream.agents.map((agent) => ({ ...workstream, id: `${workstream.id}:${agent.id}`, agents: [agent] }))).slice(0, 9)
-    : boardWorkstreams;
-  const rowBudget = (viewport.height - Math.max(76, viewport.height * .14)) / Math.max(1, useAgentTiles ? Math.ceil(displayWorkstreams.length / 3) : displayWorkstreams.length);
+  const useAgentTiles = boardWorkstreams.length > 5;
+  const displayWorkstreams = boardWorkstreams;
+  const rowBudget = (viewport.height - 64) / Math.max(1, useAgentTiles ? Math.ceil(displayWorkstreams.length / 3) : displayWorkstreams.length);
   const trailLimit = rowBudget >= 300 ? 5 : rowBudget >= 235 ? 4 : rowBudget >= 175 ? 3 : rowBudget >= 125 ? 2 : 1;
   const agentLimit = viewport.width < 700 ? 1 : rowBudget >= 300 ? 4 : rowBudget >= 220 ? 3 : rowBudget >= 155 ? 2 : 1;
 
@@ -686,7 +717,7 @@ function App() {
   const summary = showRecap
     ? `${plural(Object.keys(recap.participants).length, "AGENT")} COMPLETED`
     : liveWorkstreams.length > 0
-    ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.length, "AGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
+    ? `${plural(liveWorkstreams.length, "WORKSTREAM")} · ${plural(liveAgents.filter(agent => !agent.parentSessionId).length, "LEAD")} · ${plural(liveAgents.filter(agent => agent.parentSessionId).length, "SUBAGENT")}${attentionCount ? ` · ${attentionCount} NEEDS YOU` : ""}${recentlyDone ? ` · ${recentlyDone} RECENTLY DONE` : ""}`
     : boardWorkstreams.length > 0
       ? attentionCount
         ? `${plural(boardWorkstreams.length, "WORKSTREAM")} · ${attentionCount} NEEDS YOU`
@@ -694,16 +725,6 @@ function App() {
     : "WAITING FOR AN AGENT";
 
   return <main className={`app board-count-${Math.min(Math.max(displayWorkstreams.length, 1), 9)} ${useAgentTiles ? "agent-tile-board" : ""} ${rowBudget < 190 ? "layout-compact" : ""} ${viewport.width < 700 ? "layout-narrow" : ""} ${viewport.width / viewport.height < .78 ? "layout-portrait" : ""} ${attentionCount ? "has-attention" : ""}`}>
-    <header>
-      <div className="brand"><span className="brand-face">—_—</span><b>BIG AGENT</b></div>
-      <div className="summary">{providerSetupOpen ? "AGENT CONNECTIONS" : summary}</div>
-      <div className="header-actions">
-        <button className={`agents-toggle ${providerSetupOpen ? "is-active" : ""}`} onClick={() => { setInspection(false); setProviderSetupOpen((value) => !value); }} aria-label="Manage agent connections">{providerSetupOpen ? "BACK" : "AGENTS"}</button>
-        <button className="fullscreen-toggle" onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Toggle fullscreen (F)">⛶</button>
-        <button onClick={() => { setProviderSetupOpen(false); setInspection((value) => !value); }} aria-label="Toggle inspection">{inspection ? "AMBIENT" : "INSPECT"}</button>
-      </div>
-    </header>
-
     {providerSetupOpen
       ? <ProviderDiscovery providers={providers} busy={providerBusy} onboarding={!providerOnboardingDone} onAction={providerAction} onContinue={finishProviderSetup} />
       : showRecap
@@ -712,12 +733,16 @@ function App() {
       ? <section className="workstream-board" aria-live="polite">{displayWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.agents[0].workstreamId)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
       : <OperationalReady />}
 
-    <footer>
-      <span className={syncError ? "sync-error" : ""} title={syncError}>{syncError ? `FEED: ${syncError}` : providerSetupOpen ? "PROVIDER DISCOVERY" : showRecap ? "COMPLETED WORK" : displayWorkstreams.length ? "LIVE WORKSTREAMS" : "AMBIENT MODE"}</span>
-      <div className="controls">
-        <button onClick={() => setPrivacy((value) => !value)}>{privacy ? "PRIVATE" : "OPEN"}</button>
-      </div>
-    </footer>
+    <nav className="board-controls" aria-label="Display controls">
+      <details className={`board-status ${syncError ? "has-feed-error" : ""}`}>
+        <summary title="Display status"><ControlIcon name="status" /><span>{syncError ? "Feed issue" : providerSetupOpen ? "Connections" : showRecap ? "Run complete" : liveWorkstreams.length ? `${plural(liveWorkstreams.length, "task", "tasks")} · ${plural(liveAgents.length, "agent", "agents")}` : "Ready"}</span></summary>
+        <div className="board-status-detail"><b>BIG AGENT</b><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p>{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
+      </details>
+      <button className={providerSetupOpen ? "is-active" : ""} onClick={() => { setInspection(false); setProviderSetupOpen(value => !value); }} aria-label="Manage agent connections" aria-pressed={providerSetupOpen} title="Agent connections"><ControlIcon name="connections" /></button>
+      <button onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Fullscreen (F)"><ControlIcon name="fullscreen" /></button>
+      <button className={inspection ? "is-active" : ""} onClick={() => { setProviderSetupOpen(false); setInspection(value => !value); }} aria-label="Toggle inspection" aria-pressed={inspection} title="Inspect activity (I)"><ControlIcon name="inspect" /></button>
+      <button className={privacy ? "is-active" : ""} onClick={() => setPrivacy(value => !value)} aria-label="Toggle privacy" aria-pressed={privacy} title={privacy ? "Privacy on" : "Privacy off"}><ControlIcon name={privacy ? "lock" : "unlock"} /></button>
+    </nav>
 
     {inspection && <aside className="inspection">
       <div><h2>ACTIVITY</h2><p className="quiet">{showRecap ? `${plural(Object.keys(recap.participants).length, "AGENT")} COMPLETED` : `${plural(workstreams.length, "WORKSTREAM")} · ${plural(activeAgents.length, "ACTIVE AGENT")}`}</p></div>

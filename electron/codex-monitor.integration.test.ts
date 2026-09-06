@@ -30,13 +30,33 @@ function fixture() {
   const record = (payload: unknown) => JSON.stringify({ type: "event_msg", timestamp, payload }) + "\n";
   const add = (id: string) => {
     const path = join(directory, `${id}.jsonl`);
-    state.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, path, Date.now(), id, `/project/${id}`, "test", "model", "medium", "Agent", "", 0);
+    state.prepare("INSERT INTO threads (id, rollout_path, updated_at_ms, title, cwd, model_provider, model, reasoning_effort, agent_nickname, agent_role, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, path, Date.now(), id, `/project/${id}`, "test", "model", "medium", "Agent", "", 0);
     writeFileSync(path, record({ type: "task_started", turn_id: id }));
     return path;
   };
   const log = (thread: string, body: string | null, target = "codex_core::session::turn") => logs.prepare("INSERT INTO logs VALUES (?, ?, ?, ?, ?)").run(thread, Date.now() / 1000, 0, target, body);
   return { state, logs, add, log, record };
 }
+it("excludes internal approval reviewers before the recent-session limit while keeping delegated agents", () => {
+  const { add, state, record } = fixture();
+  add("parent");
+  add("child");
+  state.exec("ALTER TABLE threads ADD COLUMN agent_path TEXT");
+  state.prepare("UPDATE threads SET agent_path = ?, agent_nickname = ?, agent_role = ? WHERE id = ?").run("/root/architecture_walk", "Archimedes", "explorer", "child");
+  state.prepare("INSERT INTO thread_spawn_edges VALUES (?, ?)").run("child", "parent");
+  state.prepare("UPDATE threads SET model = NULL WHERE id = ?").run("child");
+  for (let index = 0; index < 25; index += 1) {
+    const id = `review-${index}`;
+    const path = add(id);
+    state.prepare("UPDATE threads SET model = ?, updated_at_ms = ? WHERE id = ?").run("codex-auto-review", Date.now() + index + 1, id);
+    if (index % 2 === 0) appendFileSync(path, record({ type: "task_complete", turn_id: id }));
+  }
+  const events = codexDesktopSessions();
+  expect(events.map(event => (event.meta as any).threadId).sort()).toEqual(["child", "parent"]);
+  expect(events.every(event => (event.meta as any).workstreamId === "parent")).toBe(true);
+  expect(events.find(event => (event.meta as any).threadId === "child")?.meta).toMatchObject({ parentSessionId: "parent", sessionTitle: "parent", agentName: "Archimedes", agentRole: "explorer", agentPath: "/root/architecture_walk", agentTaskTitle: "child" });
+});
+
 it("reports user interruption as stopped with its original terminal time", () => {
   const { add, record } = fixture();
   const path = add("stopped");

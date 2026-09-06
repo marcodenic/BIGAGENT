@@ -7,6 +7,14 @@ function envelope(format: TelemetryEnvelope["format"], payload: unknown, source 
 }
 
 describe("telemetry normalization", () => {
+  it("ignores internal Codex approval reviewers across lifecycle notifications", () => {
+    for (const format of ["codex-app-server", "codex-json"] as const) {
+      for (const method of ["thread/started", "turn/started", "turn/completed"]) {
+        const payload = { method, params: { thread: { id: "review", model: "codex-auto-review" }, turn: { id: "turn", status: "completed" } } };
+        expect(normalizeTelemetry(envelope(format, payload))).toEqual([]);
+      }
+    }
+  });
   it("distinguishes stopped Codex turns from genuine failures across transports", () => {
     for (const format of ["codex-app-server", "codex-json"] as const) {
       for (const status of ["interrupted", "cancelled", "aborted"]) {

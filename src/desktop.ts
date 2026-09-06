@@ -4,6 +4,7 @@ export type DesktopApi = {
   getSnapshot(): Promise<unknown>;
   getProviders(): Promise<unknown>;
   providerAction(provider: "codex" | "claude" | "grok" | "cursor" | "gemini" | "copilot" | "windsurf" | "opencode", action: "setup" | "retry" | "launch" | "remove"): Promise<unknown>;
+  saveRecapImage(bytes: Uint8Array): Promise<{ status: "saved"; path: string } | { status: "cancelled" }>;
   imagePreview(path: string): Promise<string>;
   setScreenAwake(active: boolean): Promise<void>;
   toggleFullscreen(): Promise<void>;

@@ -26,40 +26,6 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   position: relative;
 }
 
-header, footer {
-  display: flex;
-  align-items: center;
-  font: 400 clamp(9px, .72vw, 12px) "Geist Mono Variable", monospace;
-  letter-spacing: .13em;
-  text-transform: uppercase;
-  color: #8a8d83;
-  user-select: none;
-}
-
-header {
-  -webkit-app-region: drag;
-  min-height: clamp(34px, 3.6vh, 48px);
-  justify-content: space-between;
-  border-bottom: 1px solid #292b27;
-  cursor: grab;
-}
-
-header button, header select { -webkit-app-region: no-drag; }
-
-header:active { cursor: grabbing; }
-.brand { display: flex; align-items: center; gap: 14px; color: #ecebe5; }
-.brand b { font-weight: 500; }
-.brand-face { flex: none; color: #9a9d92; font-size: 1.3em; line-height: 1; letter-spacing: -.1em; transform: translateY(-3px); }
-.summary { margin-left: auto; margin-right: 26px; }
-.has-attention .summary { color: var(--attention); }
-.header-actions { display: flex; align-items: center; gap: clamp(14px, 1.4vw, 24px); }
-header button { opacity: 0; transition: opacity .18s, color .18s; }
-.app:hover header button { opacity: 1; }
-header button:hover { color: #efeee9; }
-header button.is-active { opacity: 1; color: var(--active); }
-header button.agents-toggle { opacity: 1; }
-.fullscreen-toggle { font-size: 1.35em; line-height: 1; letter-spacing: 0; }
-
 .workstream-board {
   min-height: 0;
   display: grid;
@@ -830,13 +796,6 @@ header button.agents-toggle { opacity: 1; }
 }
 .provider-continue:hover { border-color: var(--active); color: #efeee9; }
 
-footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; border-top: 1px solid #292b27; }
-.sync-error { color: var(--error); }
-.controls { display: flex; gap: 18px; opacity: 0; transition: opacity .18s; }
-.app:hover .controls { opacity: 1; }
-.controls button:hover { color: #efeee9; }
-.controls select { appearance: none; padding: 0; }
-
 .inspection {
   position: absolute;
   z-index: 5;
@@ -875,7 +834,6 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 
 @media (max-width: 620px) {
   .app { padding: clamp(10px, 3.5vw, 20px); }
-  .summary { display: none; }
   .provider-readiness { width: 100%; grid-template-columns: 1fr; }
   .provider-ready-state h1 { font-size: clamp(50px, 15vw, 92px); }
   .provider-status-chip { margin-left: auto; }
@@ -911,8 +869,6 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
   .agent-step { grid-template-columns: 8px 22px minmax(65px, auto) minmax(0, 1fr); font-size: 9px; }
   .agent-tool, .agent-target { display: none; }
   .inspection { width: calc(100vw - 40px); right: 20px; top: 68px; bottom: 58px; }
-  .controls { opacity: 1; }
-  .controls select { display: none; }
 }
 
 @media (max-width: 900px) {
@@ -922,8 +878,6 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 }
 
 @media (max-height: 540px) {
-  header { min-height: 34px; }
-  footer { min-height: 26px; }
   .workstream { padding: 6px 0; }
   .state-label { font-size: clamp(1.9rem, min(6.5vw, 12vh), 4.25rem); margin-bottom: 4px; }
   .workstream-identity h2 { font-size: clamp(12px, min(1.7vw, 3.8vh), 22px); }
@@ -957,3 +911,160 @@ footer { min-height: clamp(24px, 2.8vh, 36px); justify-content: space-between; b
 .recap-save { padding: 10px 14px; color: #8b8e84; font: 400 11px "Geist Mono Variable", monospace; letter-spacing: .1em; }
 .recap-save:hover { color: #efeee9; }
 .recap-save:disabled { opacity: .5; cursor: wait; }
+
+/* Child agents stay inside their parent's task, at every board density. */
+.agent-team {
+  --baby-size: clamp(64px, min(6cqi, 23cqh), 90px);
+  --team-name: clamp(14px, 1.2cqi, 20px);
+  --team-text: clamp(12px, 1cqi, 17px);
+  --team-meta: clamp(11px, .85cqi, 15px);
+  --team-gap: clamp(10px, 1.2cqi, 22px);
+  --team-width: clamp(240px, 28cqi, 480px);
+  flex: 0 1 auto; min-height: 0; overflow: auto; border-top: 1px solid #292b27; margin-top: 14px; padding-top: 10px; }
+.team-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #aeb2a5; font: var(--team-meta) "Geist Mono Variable", monospace; letter-spacing: .08em; }
+.team-heading button, .team-detail button { color: #c8ed36; background: transparent; border: 0; cursor: pointer; padding: 6px; }
+.team-members { display: flex; flex-wrap: wrap; gap: var(--team-gap); padding-top: var(--team-gap); }
+.team-member { display: flex; align-items: center; gap: var(--team-gap); flex: 1 1 var(--team-width); min-width: 0; max-width: min(100%, var(--team-width)); color: #e4e6df; background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 6px 2px; text-align: left; cursor: pointer; }
+.team-member:hover, .team-member:focus-visible { background: #ffffff08; }
+.team-member[aria-pressed="true"] { border-bottom-color: #c8ed36; }
+.team-member.team-attention { border-bottom-color: #ffbb51; }
+.baby-bot { display: block; position: relative; flex: 0 0 var(--baby-size); width: var(--baby-size); height: var(--baby-size); }
+.app .baby-bot .matrix-face { display: block; position: relative; inset: auto; transform: none; width: 100%; height: 100%; opacity: 1; animation: none; }
+.team-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.team-copy b { font-size: var(--team-name); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-status { color: #c8ed36; font: var(--team-text) "Geist Mono Variable", monospace; }
+.team-attention .team-status { color: #ffbb51; }
+.team-copy .model-identity { gap: 5px; }
+.team-copy .provider-icons i { width: calc(var(--team-meta) * 1.6); height: calc(var(--team-meta) * 1.6); }
+.team-copy .model-identity small { font-size: var(--team-meta); white-space: normal; }
+.team-detail { border-top: 1px solid #292b27; padding: 10px 0; font-size: var(--team-name); }
+.team-detail > div { display: flex; justify-content: space-between; align-items: center; }
+.team-detail p { margin: 6px 0; overflow-wrap: anywhere; }
+.team-detail ol { color: #aeb2a5; font: var(--team-text) "Geist Mono Variable", monospace; padding-left: 18px; }
+.has-team .workstream-activity { justify-content: flex-start; overflow-y: auto; }
+.has-team .agent-team { flex-shrink: 0; }
+.has-team .state-label { padding-right: 2.8em; }
+/* A spacious single task gets a readable family; dense boards stay compact. */
+.board-count-1 .agent-team {
+  --baby-size: clamp(96px, min(7cqi, 18cqh), 140px);
+  --team-name: clamp(18px, 1.2cqi, 28px);
+  --team-text: clamp(14px, 1cqi, 22px);
+  --team-meta: clamp(12px, .85cqi, 18px);
+  --team-width: clamp(280px, 30cqi, 640px);
+}
+.agent-tile-board .agent-team, .layout-compact .agent-team {
+  --baby-size: clamp(44px, min(8cqi, 22cqh), 60px);
+  --team-name: 14px; --team-text: 12px; --team-meta: 11px;
+  --team-gap: 10px; --team-width: 240px;
+}
+@media (max-width: 700px) {
+  .app .agent-team {
+    --baby-size: clamp(52px, 12vw, 72px);
+    --team-name: 16px; --team-text: 13px; --team-meta: 12px;
+    --team-gap: 10px; --team-width: 260px;
+  }
+  .has-team .state-label { padding-right: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .baby-bot *, .baby-bot *::before, .baby-bot *::after { animation: none !important; transition: none !important; }
+}
+.has-team > .matrix-face { width: min(calc(var(--identity-width) * .74), 48cqh, 230px); top: 68%; }
+.workstream-identity .identity-meta { flex-wrap: wrap; row-gap: 6px; }
+.workstream-identity .model-identity small { max-width: none; white-space: normal; }
+.agent-tile-board .workstream-board { overflow-y: auto; grid-auto-rows: minmax(290px, 1fr); }
+@media (max-width: 700px) {
+  .workstream-board:has(.has-team) { overflow-y: auto; grid-auto-rows: minmax(380px, auto); }
+  .app .has-team .workstream-activity { padding: 0; align-self: stretch; }
+  .app .has-team > .matrix-face { display: none; }
+  .app .has-team .state-label { font-size: 42px; }
+  .has-team .workstream-identity { padding-right: 145px; }
+  .app .has-team .workstream time { font-size: 24px; }
+}
+.team-assignment { color: #b5b8ae; font-size: var(--team-text); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-detail .team-assignment { white-space: normal; overflow-wrap: anywhere; }
+.recap-save-result { max-width: min(90vw, 700px); overflow-wrap: anywhere; color: #b5b8ae; font-size: 13px; }
+/* Delegating does not turn a single task into a dense, top-aligned board.
+   Safe centring falls back to the start when content needs to scroll. */
+.board-count-1 .has-team .workstream-activity { justify-content: safe center; align-self: stretch; }
+.board-count-1:not(.layout-portrait) .has-team > .matrix-face {
+  top: 61%;
+  width: min(calc(var(--identity-width) * .9), 265px);
+}
+
+/* A lone task uses a generous composition, rather than a small fixed stack
+   floating in the centre of a room-size display. Dense boards retain their
+   existing content-fitting rules. */
+@media (min-width: 1000px) and (min-height: 700px) {
+  .board-count-1:not(.layout-portrait) .workstream-activity {
+    align-self: center;
+    height: 80%;
+    min-height: 0;
+    justify-content: space-evenly;
+    gap: clamp(16px, 2cqh, 44px);
+    overflow-y: auto;
+  }
+  .board-count-1:not(.layout-portrait) .workstream-activity > * { flex-shrink: 0; }
+  .board-count-1:not(.layout-portrait) .workstream-activity[data-fit="roomy"] .state-label {
+    font-size: clamp(70px, min(12cqi, 15cqh), 240px);
+    margin-bottom: 0;
+    padding-right: 0;
+  }
+  .board-count-1:not(.layout-portrait) .workstream-activity[data-fit="roomy"] .agent-focus {
+    font-size: clamp(34px, min(4.5cqi, 6cqh), 96px);
+    line-height: 1.12;
+  }
+  .board-count-1:not(.layout-portrait) .agent-focus-copy { -webkit-line-clamp: 3; }
+  .board-count-1:not(.layout-portrait) .workstream-activity[data-fit="roomy"] .agent-step {
+    font-size: clamp(18px, min(1.8cqi, 2.8cqh), 38px);
+  }
+  .board-count-1:not(.layout-portrait) .workstream-activity[data-fit="roomy"] .rolling-activity {
+    --activity-row-height: clamp(30px, 3.5cqh, 58px);
+  }
+  .board-count-1:not(.layout-portrait) .workstream > .matrix-face {
+    width: min(calc(var(--identity-width) * .9), 42cqh, 580px);
+    top: 57%;
+  }
+  .board-count-1:not(.layout-portrait) .agent-team {
+    --baby-size: clamp(110px, min(10cqi, 19cqh), 220px);
+    --team-name: clamp(20px, 1.5cqi, 36px);
+    --team-text: clamp(16px, 1.2cqi, 28px);
+    --team-meta: clamp(13px, 1cqi, 22px);
+    --team-gap: clamp(14px, 1.6cqi, 36px);
+    --team-width: clamp(300px, 31cqi, 850px);
+    margin-top: 0;
+    padding-top: clamp(12px, 2cqh, 36px);
+  }
+}
+@media (min-width: 1000px) and (min-height: 700px) {
+  .board-count-1:not(.layout-portrait) .workstream-activity:not([data-fit="roomy"]) .agent-team {
+    --baby-size: 72px;
+    --team-name: 16px; --team-text: 14px; --team-meta: 12px;
+    --team-gap: 12px; --team-width: 240px;
+    padding-top: 12px;
+  }
+}
+
+/* One compact control dock replaces both full-width chrome bands. */
+.app { grid-template-rows: minmax(0, 1fr) auto; }
+.board-controls { justify-self: end; display: flex; align-items: center; gap: 4px; min-height: 44px; color: #b8bcb0; font-size: clamp(14px, 1vw, 20px); }
+.board-controls svg { display: block; width: 22px; height: 22px; flex: none; }
+.board-controls > button, .board-status > summary { min-height: 44px; padding: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 5px; cursor: pointer; }
+.board-controls > button { min-width: 44px; }
+.board-controls > button:hover, .board-status > summary:hover { background: #ffffff0c; color: #efeee9; }
+.board-controls .is-active, .has-attention .board-status { color: var(--active); }
+.board-controls :focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.board-status { position: relative; }
+.board-status > summary { list-style: none; user-select: none; }
+.board-status > summary::-webkit-details-marker { display: none; }
+.board-status-detail { position: absolute; bottom: calc(100% + 10px); right: 0; width: min(380px, calc(100vw - 32px)); padding: 18px; background: #141611; border: 1px solid #45493d; border-radius: 8px; z-index: 15; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.board-status-detail p { margin: 10px 0 0; }
+.board-status.has-feed-error { color: var(--error); }
+@media (max-width: 700px) {
+  .board-controls { gap: 0; font-size: 13px; }
+  .board-controls > button, .board-status > summary { padding: 8px; }
+  .board-controls svg { width: 20px; height: 20px; }
+  .board-status-detail { position: fixed; bottom: 64px; right: 16px; }
+}
+.project-heading { -webkit-app-region: drag; }
+.board-controls { position: relative; z-index: 7; }
+.has-attention .board-status { color: var(--attention); }

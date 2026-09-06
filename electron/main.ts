@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import { dirname, extname, isAbsolute, join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, dialog } from "electron";
 import type { codexDesktopSessions } from "./codex-sessions";
 import { Worker } from "node:worker_threads";
 import { uncoveredCodexEvents } from "./codex-feed";
@@ -219,6 +219,22 @@ function registerIpc() {
     else if (provider === "claude") await claudeProvider?.action(action);
     else await structuredProviders.find((candidate) => candidate.health().id === provider)?.action(action);
     return providerSnapshot();
+  });
+  ipcMain.handle("big-agent:save-recap-image", async (event, bytes: unknown) => {
+    const window = windowForEvent(event);
+    if (!window) throw new Error("Export window is unavailable");
+    if (!(bytes instanceof Uint8Array) || bytes.length > 20 * 1024 * 1024
+      || !Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+      throw new Error("Invalid recap image");
+    }
+    const result = await dialog.showSaveDialog(window, {
+      title: "Save completed run image",
+      defaultPath: join(app.getPath("pictures"), "big-agent-run.png"),
+      filters: [{ name: "PNG image", extensions: ["png"] }],
+    });
+    if (result.canceled || !result.filePath) return { status: "cancelled" };
+    await writeFile(result.filePath, bytes);
+    return { status: "saved", path: result.filePath };
   });
   ipcMain.handle("big-agent:image-preview", (_event, path: string) => imagePreview(path));
   ipcMain.handle("big-agent:set-screen-awake", (_event, active: boolean) => idleDisplay?.setActive(Boolean(active)));

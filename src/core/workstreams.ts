@@ -10,6 +10,9 @@ export interface AgentSession {
   workstreamName: string;
   sessionTitle: string;
   agentName: string;
+  agentRole?: string;
+  agentPath?: string;
+  agentTaskTitle?: string;
   modelProvider: string;
   model: string;
   effort: string;
@@ -88,6 +91,9 @@ export function applySessionEvent(
   const workstreamName = metaText(event, "workstreamName") ?? metaText(event, "project") ?? metaText(event, "sessionName") ?? previous?.workstreamName ?? "AMBIENT TASK";
   const sessionTitle = metaText(event, "sessionTitle") ?? previous?.sessionTitle ?? "";
   const agentName = metaText(event, "agentName") ?? metaText(event, "sessionName") ?? previous?.agentName ?? "AGENT";
+  const agentRole = metaText(event, "agentRole") ?? previous?.agentRole;
+  const agentPath = metaText(event, "agentPath") ?? previous?.agentPath;
+  const agentTaskTitle = metaText(event, "agentTaskTitle") ?? previous?.agentTaskTitle;
   const modelProvider = metaText(event, "modelProvider") ?? previous?.modelProvider ?? "unknown";
   const model = metaText(event, "model") ?? previous?.model ?? "unknown model";
   const effort = metaText(event, "reasoningEffort") ?? previous?.effort ?? "";
@@ -116,7 +122,7 @@ export function applySessionEvent(
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
   return {
     ...sessions,
-    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, sessionTitle, agentName, modelProvider, model, effort, lastMessage, state, updatedAt: now },
+    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, sessionTitle, agentName, agentRole, agentPath, agentTaskTitle, modelProvider, model, effort, lastMessage, state, updatedAt: now },
   };
 }
 
@@ -178,8 +184,24 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
     if (session.state.status !== "complete" && session.state.status !== "stopped") return true;
     return now - (session.state.endedAt ?? session.updatedAt) <= completedTtlMs;
   });
+  // Keep an idle/finished lead as context while its children are still visible.
+  const included = new Map(visible.map(session => [session.id, session]));
+  const rootFor = (session: AgentSession) => {
+    let root = session;
+    const seen = new Set([root.id]);
+    while (root.parentSessionId && sessions[root.parentSessionId] && !seen.has(root.parentSessionId)) {
+      root = sessions[root.parentSessionId];
+      seen.add(root.id);
+      included.set(root.id, root);
+    }
+    return root.workstreamId;
+  };
+  const roots = new Map(visible.map(session => [session.id, rootFor(session)]));
   const grouped = new Map<string, AgentSession[]>();
-  for (const session of visible) grouped.set(session.workstreamId, [...(grouped.get(session.workstreamId) ?? []), session]);
+  for (const session of included.values()) {
+    const id = roots.get(session.id) ?? rootFor(session);
+    grouped.set(id, [...(grouped.get(id) ?? []), session]);
+  }
   const workstreams: Workstream[] = [];
   for (const [id, agents] of grouped) {
     agents.sort((a, b) => (a.state.startedAt ?? a.updatedAt) - (b.state.startedAt ?? b.updatedAt) || a.id.localeCompare(b.id));
@@ -188,7 +210,7 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
     const errors = agents.filter((agent) => agent.state.status === "error");
     // A live sibling keeps the workstream focused on current work. If nothing
     // is live, a terminal error becomes the aggregate and remains actionable.
-    const aggregateCandidates = activeAgents.length ? activeAgents : errors.length ? errors : agents;
+    const aggregateCandidates = activeAgents.length ? activeAgents : errors.length ? errors : agents.filter(agent => agent.state.status !== "idle");
     const attention = aggregateCandidates.some((agent) => agent.state.attention);
     const rankedActive = [...aggregateCandidates].sort((a, b) => statusPriority[b.state.status] - statusPriority[a.state.status] || b.updatedAt - a.updatedAt);
     const aggregate = attention ? aggregateCandidates.find((agent) => agent.state.attention)! : rankedActive[0] ?? lead;

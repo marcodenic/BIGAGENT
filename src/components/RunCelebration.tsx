@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { faceHash } from "./animatedFaceModel";
 import { FaceVisual } from "./FaceVisual";
 import type { RunRecap } from "../core/runRecap";
+import { desktopApi } from "../desktop";
 import { formatElapsed } from "../core/reducer";
 
 function CelebratingFace({ identity, index }: { identity: string; index: number }) {
@@ -22,7 +23,8 @@ function CelebratingFace({ identity, index }: { identity: string; index: number 
 /** Export only the anonymous recap artwork, never the app or its activity panel. */
 async function saveImage(root: HTMLElement, count: number, elapsed: string) {
   const faces = [...root.querySelectorAll<SVGSVGElement>(".recap-character svg")];
-  const columns = Math.min(4, faces.length);
+  const columns = Math.max(1, Math.min(4, faces.length));
+  await document.fonts.ready;
   const rows = Math.ceil(faces.length / columns);
   const canvas = document.createElement("canvas");
   canvas.width = 1600; canvas.height = 460 + rows * 300;
@@ -52,15 +54,19 @@ async function saveImage(root: HTMLElement, count: number, elapsed: string) {
   }
   ctx.font = '22px "Geist Mono Variable", monospace'; ctx.fillText("BIG AGENT", 800, canvas.height - 45);
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("Could not create image")), "image/png"));
+  const desktop = desktopApi();
+  if (desktop) return desktop.saveRecapImage(new Uint8Array(await blob.arrayBuffer()));
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a"); link.href = url; link.download = "big-agent-run.png"; link.click();
+  const link = document.createElement("a"); link.href = url; link.download = "big-agent-run.png"; document.body.append(link); link.click(); link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { status: "downloaded" as const };
 }
 
 export function RunCelebration({ recap }: { recap: RunRecap }) {
   const root = useRef<HTMLElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [saveResult, setSaveResult] = useState("");
   const agents = Object.values(recap.participants);
   const groups = new Map<string, number>();
   for (const agent of agents) groups.set(agent.workstreamId, (groups.get(agent.workstreamId) ?? 0) + 1);
@@ -76,11 +82,15 @@ export function RunCelebration({ recap }: { recap: RunRecap }) {
     <p className="recap-ready">Waiting for your next run</p>
     <button className="recap-save" disabled={saving} onClick={async () => {
       if (!root.current) return;
-      setSaving(true); setError("");
-      try { await saveImage(root.current, agents.length, elapsed); }
+      setSaving(true); setError(""); setSaveResult("");
+      try {
+        const result = await saveImage(root.current, agents.length, elapsed);
+        setSaveResult(result.status === "saved" ? `Saved to ${result.path}` : result.status === "cancelled" ? "Save cancelled" : "Download started: big-agent-run.png");
+      }
       catch { setError("Could not save image. Please try again."); }
       finally { setSaving(false); }
     }}>{saving ? "SAVING…" : "SAVE IMAGE"}</button>
+    {saveResult && <p className="recap-save-result" role="status">{saveResult}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;
 }
