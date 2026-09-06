@@ -3,7 +3,16 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
 
 export default defineConfig({
-  main: {},
+  main: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "codex-monitor-worker": resolve(__dirname, "electron/codex-monitor-worker.ts"),
+        },
+      },
+    } as never,
+  },
   // Sandboxed Electron preload scripts execute as CommonJS. Keeping this
   // explicit avoids electron-vite following package.json's ESM mode and
   // emitting an index.mjs file that Chromium cannot execute in the sandbox.

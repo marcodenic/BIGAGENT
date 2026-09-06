@@ -1,0 +1,99 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+vi.mock("node:sqlite", async () => {
+  const { createRequire } = await import("node:module");
+  return createRequire(import.meta.url)("node:sqlite");
+});
+import { DatabaseSync } from "node:sqlite";
+import { codexDesktopSessions, codexSourceSignature } from "./codex-sessions";
+let directory = "";
+const databases: DatabaseSync[] = [];
+afterEach(() => {
+  for (const db of databases.splice(0)) db.close();
+  vi.unstubAllEnvs();
+  if (directory) rmSync(directory, { recursive: true, force: true });
+});
+function fixture() {
+  directory = mkdtempSync(join(tmpdir(), "bigagent-monitor-"));
+  vi.stubEnv("CODEX_HOME", directory);
+  const state = new DatabaseSync(join(directory, "state_5.sqlite"));
+  const logs = new DatabaseSync(join(directory, "logs_2.sqlite"));
+  databases.push(state, logs);
+  state.exec(`PRAGMA journal_mode=WAL;
+    CREATE TABLE threads (id TEXT, rollout_path TEXT, updated_at_ms INTEGER, title TEXT, cwd TEXT, model_provider TEXT, model TEXT, reasoning_effort TEXT, agent_nickname TEXT, agent_role TEXT, archived INTEGER);
+    CREATE TABLE thread_spawn_edges (child_thread_id TEXT, parent_thread_id TEXT);`);
+  logs.exec(`PRAGMA journal_mode=WAL;
+    CREATE TABLE logs (thread_id TEXT, ts INTEGER, ts_nanos INTEGER, target TEXT, feedback_log_body TEXT);`);
+  const timestamp = new Date(Date.now() - 10_000).toISOString();
+  const record = (payload: unknown) => JSON.stringify({ type: "event_msg", timestamp, payload }) + "\n";
+  const add = (id: string) => {
+    const path = join(directory, `${id}.jsonl`);
+    state.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, path, Date.now(), id, `/project/${id}`, "test", "model", "medium", "Agent", "", 0);
+    writeFileSync(path, record({ type: "task_started", turn_id: id }));
+    return path;
+  };
+  const log = (thread: string, body: string | null, target = "codex_core::session::turn") => logs.prepare("INSERT INTO logs VALUES (?, ?, ?, ?, ?)").run(thread, Date.now() / 1000, 0, target, body);
+  return { state, logs, add, log, record };
+}
+it("reuses unchanged sessions but refreshes changed files and metadata", () => {
+  const { add, state, record } = fixture();
+  const firstPath = add("a1");
+  const secondPath = add("b2");
+  const first = codexDesktopSessions().find(event => (event.meta as any).threadId === "a1")!;
+  expect(codexDesktopSessions().find(event => (event.meta as any).threadId === "a1")).toBe(first);
+  appendFileSync(secondPath, record({ type: "task_complete", turn_id: "b2" }));
+  const changed = codexDesktopSessions();
+  expect(changed.find(event => (event.meta as any).threadId === "a1")).toBe(first);
+  expect(changed.find(event => (event.meta as any).threadId === "b2")?.status).toBe("complete");
+  state.prepare("UPDATE threads SET cwd = ? WHERE id = ?").run("/project/renamed", "a1");
+  expect((codexDesktopSessions().find(event => (event.meta as any).threadId === "a1")?.meta as any).workstreamName).toBe("renamed");
+  const signature = codexSourceSignature();
+  writeFileSync(firstPath, record({ type: "task_started", turn_id: "c3" }));
+  expect(codexSourceSignature()).not.toBe(signature);
+  expect((codexDesktopSessions().find(event => (event.meta as any).threadId === "a1")?.meta as any).turnId).toBe("c3");
+  state.prepare("UPDATE threads SET archived = 1 WHERE id = ?").run("a1");
+  expect(codexDesktopSessions().some(event => (event.meta as any).threadId === "a1")).toBe(false);
+});
+it("reads appended lifecycle evidence and survives a log reset and checkpoint", () => {
+  const { add, logs, log } = fixture();
+  add("a1"); add("b2");
+  expect(codexDesktopSessions().every(event => event.status !== "complete")).toBe(true);
+  log("a1", null);
+  expect(codexDesktopSessions().every(event => event.status !== "complete")).toBe(true);
+  log("a1", "post sampling token usage turn_id=a1 needs_follow_up=false");
+  expect(codexDesktopSessions().find(event => (event.meta as any).threadId === "a1")?.status).toBe("complete");
+  log("b2", "Agent loop exited", "codex_core::session::handlers");
+  expect(codexDesktopSessions().find(event => (event.meta as any).threadId === "b2")?.status).toBe("complete");
+  logs.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  expect(codexDesktopSessions().every(event => event.status === "complete")).toBe(true);
+  logs.exec("DELETE FROM logs");
+  log("a1", "post sampling token usage turn_id=a1 needs_follow_up=false");
+  const reset = codexDesktopSessions();
+  expect(reset.find(event => (event.meta as any).threadId === "a1")?.status).toBe("complete");
+  expect(reset.find(event => (event.meta as any).threadId === "b2")?.status).not.toBe("complete");
+});
+
+
+it("publishes worker snapshots only when content changes and detects completion", async () => {
+  const { add, log } = fixture();
+  add("a1");
+  const { build } = await import("esbuild");
+  const { Worker } = await import("node:worker_threads");
+  const workerPath = join(directory, "monitor.cjs");
+  await build({ entryPoints: ["electron/codex-monitor-worker.ts"], outfile: workerPath, bundle: true, platform: "node", format: "cjs" });
+  const worker = new Worker(workerPath, { env: { ...process.env, CODEX_HOME: directory } });
+  const messages: any[] = [];
+  worker.on("message", message => messages.push(message));
+  try {
+    await vi.waitFor(() => expect(messages.some(message => message.type === "snapshot")).toBe(true));
+    expect(messages[0].events[0].status).not.toBe("complete");
+    worker.postMessage("refresh");
+    await new Promise(resolve => setTimeout(resolve, 350));
+    expect(messages).toHaveLength(1);
+    log("a1", "post sampling token usage turn_id=a1 needs_follow_up=false");
+    await vi.waitFor(() => expect(messages.some(message => message.events?.some((event: any) => event.status === "complete"))).toBe(true));
+    expect(messages.every(message => message.type !== "error")).toBe(true);
+  } finally { await worker.terminate(); }
+});

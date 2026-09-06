@@ -3,7 +3,8 @@ import { copyFile, mkdir, readFile, rename, stat } from "node:fs/promises";
 import type { Server } from "node:http";
 import { dirname, extname, isAbsolute, join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu } from "electron";
-import { codexDesktopSessions, codexSourceSignature, codexSessionStoreAvailable } from "./codex-sessions";
+import type { codexDesktopSessions } from "./codex-sessions";
+import { Worker } from "node:worker_threads";
 import { uncoveredCodexEvents } from "./codex-feed";
 import { ClaudeProvider } from "./providers/claude";
 import { CodexAppServerProvider } from "./providers/codex-app-server";
@@ -58,15 +59,15 @@ const IMAGE_MIME = new Map([
 
 let mainWindow: BrowserWindow | null = null;
 let protocolServer: Server | null = null;
-let watcherTimer: NodeJS.Timeout | null = null;
+let monitorWorker: Worker | null = null;
+let monitorRestart: NodeJS.Timeout | null = null;
+let quitting = false;
 let idleDisplay: IdleDisplay | null = null;
 let stopOpenCodeSource: (() => void) | null = null;
 let codexProvider: CodexAppServerProvider | null = null;
 let claudeProvider: ClaudeProvider | null = null;
 let structuredProviders: StructuredHookProvider[] = [];
-let previousSignature = "";
 let previousSessions = "";
-let safetyRefreshAt = 0;
 const telemetryHub = new TelemetryHub();
 const allowCodexFallback = process.env.BIG_AGENT_CODEX_FALLBACK !== "0";
 let localCodexEvents: ReturnType<typeof codexDesktopSessions> = [];
@@ -96,39 +97,70 @@ async function imagePreview(path: string) {
   return `data:${mime};base64,${bytes.toString("base64")}`;
 }
 
-function refreshSessions(force = false) {
-  if (!allowCodexFallback) return;
-  const now = Date.now();
-  try {
-    const signature = codexSourceSignature();
-    if (!force && signature === previousSignature && now < safetyRefreshAt) return;
-    localCodexEvents = codexDesktopSessions();
-    const latest = new Map(localCodexEvents.map((event) => [
-      (event.meta as Record<string, unknown>).threadId, event,
-    ]));
-    codexProvider?.noteLocalFeed(codexSessionStoreAvailable(), [...latest.values()]
-      .filter((event) => event.status !== "complete" && event.status !== "error").length);
-    const sessions = codexFallbackEvents();
-    telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);
-    const serialized = JSON.stringify(sessions);
-    if (serialized !== previousSessions) {
-      send("big-agent:sessions", sessions);
-      previousSessions = serialized;
-    }
-    previousSignature = signature;
-    safetyRefreshAt = now + 15_000;
-  } catch (error) {
-    codexProvider?.noteLocalFeed(false, 0);
-    telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", "error", error instanceof Error ? error.message : String(error));
-    console.error("Codex session refresh failed:", error);
+function publishLocalSessions(available?: boolean) {
+  if (available !== undefined) {
+    const latest = new Map(localCodexEvents.map(event => [(event.meta as Record<string, unknown>).threadId, event]));
+    codexProvider?.noteLocalFeed(available, [...latest.values()]
+      .filter(event => event.status !== "complete" && event.status !== "error").length);
+  }
+  const sessions = codexFallbackEvents();
+  telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);
+  const serialized = JSON.stringify(sessions);
+  if (serialized !== previousSessions) {
+    send("big-agent:sessions", sessions);
+    previousSessions = serialized;
   }
 }
 
-function startSessionWatcher() {
+function refreshSessions(force = false) {
   if (!allowCodexFallback) return;
-  refreshSessions(true);
-  watcherTimer = setInterval(refreshSessions, 250);
-  watcherTimer.unref();
+  // Source handoffs use the cached snapshot immediately. Expensive reads are
+  // serialized in the worker, so they never hold up input or window handling.
+  publishLocalSessions();
+  if (force) monitorWorker?.postMessage("refresh");
+}
+
+function startSessionWatcher() {
+  if (!allowCodexFallback || quitting) return;
+  const worker = new Worker(join(__dirname, "codex-monitor-worker.js"));
+  monitorWorker = worker;
+  const reportError = (message: string) => {
+    codexProvider?.noteLocalFeed(false, 0);
+    telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", "error", message);
+    console.error("Codex session refresh failed:", message);
+  };
+  worker.on("message", (message) => {
+    if (quitting || monitorWorker !== worker) return;
+    if (message.type === "error") reportError(message.message);
+    else if (message.type === "snapshot") {
+      localCodexEvents = message.events;
+      publishLocalSessions(message.available);
+    }
+  });
+  worker.on("error", error => reportError(error instanceof Error ? error.message : String(error)));
+  worker.on("exit", () => {
+    if (monitorWorker === worker) monitorWorker = null;
+    if (!quitting) {
+      monitorRestart = setTimeout(startSessionWatcher, 5_000);
+      monitorRestart.unref();
+    }
+  });
+  worker.unref();
+}
+
+async function smokeTestMonitor() {
+  const worker = new Worker(join(__dirname, "codex-monitor-worker.js"), { workerData: { smoke: true } });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Monitor worker startup timed out")), 10_000);
+      worker.once("message", message => {
+        clearTimeout(timeout);
+        if (message.type === "ready") resolve(); else reject(new Error("Unexpected monitor response"));
+      });
+      worker.once("error", error => { clearTimeout(timeout); reject(error); });
+      worker.once("exit", code => { clearTimeout(timeout); reject(new Error(`Monitor exited before ready: ${code}`)); });
+    });
+  } finally { await worker.terminate(); }
 }
 
 function codexFallbackEvents() {
@@ -247,6 +279,7 @@ else {
       { role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
     ]) : null);
     if (smokeTest) {
+      await smokeTestMonitor();
       registerIpc();
       await createWindow();
       const passed = await mainWindow!.webContents.executeJavaScript(`new Promise(resolve => {
@@ -302,7 +335,9 @@ else {
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("before-quit", () => {
-  if (watcherTimer) clearInterval(watcherTimer);
+  quitting = true;
+  if (monitorRestart) clearTimeout(monitorRestart);
+  void monitorWorker?.terminate();
   stopOpenCodeSource?.();
   codexProvider?.stop();
   claudeProvider?.stop();

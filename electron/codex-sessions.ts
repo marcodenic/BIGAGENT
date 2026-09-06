@@ -22,6 +22,8 @@ type ItemRow = { item_type: string; item_json: string; updated_at_ordinal: numbe
 type LiveRolloutItem = ItemRow & { timestamp: number; callId?: string; transient?: boolean };
 type LiveRolloutState = {
   offset: number;
+  fileIdentity?: string;
+  stamp?: string;
   decoder: StringDecoder;
   discardInitialLine: boolean;
   remainder: string;
@@ -151,11 +153,15 @@ function updateLiveRollout(path: string) {
   }
 
   let state = liveRollouts.get(path);
-  if (!state || metadata.size < state.offset) {
+  const fileIdentity = `${metadata.dev}:${metadata.ino}:${metadata.birthtimeMs}`;
+  const stamp = sourceStamp(path);
+  if (!state || state.fileIdentity !== fileIdentity || metadata.size < state.offset || (metadata.size === state.offset && state.stamp !== stamp)) {
     const start = Math.max(0, metadata.size - INITIAL_ROLLOUT_TAIL_BYTES);
     state = emptyLiveRollout(start);
+    state.fileIdentity = fileIdentity;
     liveRollouts.set(path, state);
   }
+  state.stamp = stamp;
   if (metadata.size === state.offset) return state;
 
   const descriptor = openSync(path, "r");
@@ -296,6 +302,61 @@ function completedTurnTimes() {
   }
 }
 
+type LifecycleCache = {
+  identity: string; stamp: string; cursor: number;
+  exits: Map<string, number>; completions: Map<string, number>;
+};
+let lifecycleCache: LifecycleCache | undefined;
+function lifecycleTimes() {
+  const path = logsDatabasePath();
+  let identity: string;
+  try {
+    const stat = statSync(path, { bigint: true });
+    identity = `${path}:${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
+  } catch {
+    lifecycleCache = undefined;
+    return { exits: new Map<string, number>(), completions: new Map<string, number>() };
+  }
+  const stamp = `${sourceStamp(path)}:${sourceStamp(`${path}-wal`)}`;
+  if (lifecycleCache?.identity === identity && lifecycleCache.stamp === stamp) return lifecycleCache;
+  const database = openReadOnly(path);
+  try {
+    // Capture the boundary before reading: concurrent appends are picked up on
+    // the next pass, including when they arrive during the cold-start queries.
+    const cursor = queryOne<{ id: number }>(database, "SELECT COALESCE(MAX(rowid), 0) AS id FROM logs")!.id;
+    if (!lifecycleCache || lifecycleCache.identity !== identity || cursor <= lifecycleCache.cursor) {
+      lifecycleCache = { identity, stamp, cursor, exits: agentLoopExitTimes(), completions: completedTurnTimes() };
+      return lifecycleCache;
+    }
+    const rows = queryAll<CompletedTurnRow & { ts_nanos: number; target: string }>(database, `
+      SELECT thread_id, ts, ts_nanos, target, feedback_log_body FROM logs
+      WHERE rowid > ? AND rowid <= ? AND thread_id IS NOT NULL
+        AND target IN ('codex_core::session::handlers', 'codex_core::session::turn')
+      ORDER BY rowid
+    `, lifecycleCache.cursor, cursor);
+    for (const row of rows) {
+      if (typeof row.feedback_log_body !== "string") continue;
+      if (row.target === "codex_core::session::handlers" && row.feedback_log_body.endsWith("Agent loop exited")) {
+        const timestamp = row.ts + row.ts_nanos / 1e9;
+        lifecycleCache.exits.set(row.thread_id, Math.max(lifecycleCache.exits.get(row.thread_id) ?? 0, timestamp));
+      } else if (row.target === "codex_core::session::turn" && row.feedback_log_body.includes("post sampling token usage") && row.feedback_log_body.includes("needs_follow_up=false")) {
+        const turn = row.feedback_log_body.match(/\bturn_id=([0-9a-f-]+)/)?.[1];
+        if (turn) {
+          const key = `${row.thread_id}:${turn}`;
+          lifecycleCache.completions.set(key, Math.max(lifecycleCache.completions.get(key) ?? 0, row.ts));
+        }
+      }
+    }
+    if (lifecycleCache.completions.size > 1000) {
+      lifecycleCache.completions = new Map([...lifecycleCache.completions]
+        .sort((a, b) => b[1] - a[1]).slice(0, 1000));
+    }
+    lifecycleCache.stamp = stamp;
+    lifecycleCache.cursor = cursor;
+    return lifecycleCache;
+  } finally { database.close(); }
+}
+
 function stateDatabasePath() {
   return join(codexHome(), "state_5.sqlite");
 }
@@ -319,7 +380,7 @@ function tryOpenReadOnly(path: string) {
 function sourceStamp(path: string) {
   try {
     const metadata = statSync(path, { bigint: true });
-    return `${metadata.size}:${metadata.mtimeNs}`;
+    return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`;
   } catch {
     return "0:0";
   }
@@ -334,11 +395,15 @@ export function codexSourceSignature() {
     .join("|");
 }
 
+let recentThreadsCache: { key: string; rows: StateThreadRow[] } | undefined;
 function recentRolloutThreads() {
+  const path = stateDatabasePath();
+  const key = `${path}:${sourceStamp(path)}:${sourceStamp(`${path}-wal`)}`;
+  if (recentThreadsCache?.key === key) return recentThreadsCache.rows;
   const database = tryOpenReadOnly(stateDatabasePath());
   if (!database) return [];
   try {
-    return queryAll<StateThreadRow>(database, `
+    const rows = queryAll<StateThreadRow>(database, `
       SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
         reasoning_effort, agent_nickname, agent_role
       FROM threads
@@ -346,6 +411,8 @@ function recentRolloutThreads() {
       ORDER BY updated_at_ms DESC
       LIMIT 24
     `);
+    recentThreadsCache = { key, rows };
+    return rows;
   } catch {
     return [];
   } finally {
@@ -353,10 +420,14 @@ function recentRolloutThreads() {
   }
 }
 
+let namesCache: { key: string; names: Map<string, string> } | undefined;
 function threadNames() {
+  const path = join(codexHome(), "session_index.jsonl");
+  const key = `${path}:${sourceStamp(path)}`;
+  if (namesCache?.key === key) return namesCache.names;
   const names = new Map<string, string>();
   try {
-    for (const line of readFileSync(join(codexHome(), "session_index.jsonl"), "utf8").split("\n")) {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
       if (!line) continue;
       const value = parseJson(line);
       const id = text(value.id);
@@ -366,6 +437,7 @@ function threadNames() {
   } catch {
     // Codex may not have written its optional session index yet.
   }
+  namesCache = { key, names };
   return names;
 }
 
@@ -644,23 +716,22 @@ export function codexDesktopSnapshot() {
   return active;
 }
 
+const threadEvents = new Map<string, { key: string; events: JsonObject[] }>();
+const displayMetadata = new Map<string, { key: string; display: ThreadDisplayMeta }>();
 export function codexDesktopSessions() {
   if (!existsSync(stateDatabasePath())) return [];
   const stateDatabase = openReadOnly(stateDatabasePath());
   try {
     const recentCutoffMs = Date.now() - 10 * 60_000;
-    const loopExitTimes = agentLoopExitTimes();
-    const turnCompletionTimes = completedTurnTimes();
+    const { exits: loopExitTimes, completions: turnCompletionTimes } = lifecycleTimes();
     const names = threadNames();
-    const rolloutThreads = queryAll<StateThreadRow>(stateDatabase, `
-      SELECT id, rollout_path, updated_at_ms, title, cwd, model_provider, model,
-        reasoning_effort, agent_nickname, agent_role
-      FROM threads
-      WHERE archived = 0 AND rollout_path IS NOT NULL AND rollout_path != ''
-        AND updated_at_ms >= ?
-      ORDER BY updated_at_ms DESC
-      LIMIT 24
-    `, recentCutoffMs);
+    const rolloutThreads = recentRolloutThreads().filter(thread => thread.updated_at_ms >= recentCutoffMs);
+    const stateStamp = `${sourceStamp(stateDatabasePath())}:${sourceStamp(`${stateDatabasePath()}-wal`)}`;
+    const namesStamp = sourceStamp(join(codexHome(), "session_index.jsonl"));
+    const currentPaths = new Set(rolloutThreads.map(thread => thread.rollout_path));
+    for (const path of liveRollouts.keys()) if (!currentPaths.has(path)) liveRollouts.delete(path);
+    for (const path of threadEvents.keys()) if (!currentPaths.has(path)) threadEvents.delete(path);
+    for (const path of displayMetadata.keys()) if (!currentPaths.has(path)) displayMetadata.delete(path);
     const events: JsonObject[] = [];
     for (const thread of rolloutThreads) {
       const live = updateLiveRollout(thread.rollout_path);
@@ -674,7 +745,14 @@ export function codexDesktopSessions() {
           turnCompletionTimes.get(`${thread.id}:${live.turnId}`) ?? 0,
         ) || undefined,
       );
-      const display = threadDisplayMeta(stateDatabase, names, thread);
+      const metadataKey = JSON.stringify([thread, stateStamp, namesStamp]);
+      const previousDisplay = displayMetadata.get(thread.rollout_path);
+      const display = previousDisplay?.key === metadataKey
+        ? previousDisplay.display : threadDisplayMeta(stateDatabase, names, thread);
+      displayMetadata.set(thread.rollout_path, { key: metadataKey, display });
+      const key = JSON.stringify([thread.id, live.offset, live.stamp, display, lifecycle]);
+      const cached = threadEvents.get(thread.rollout_path);
+      if (cached?.key === key) { events.push(...cached.events); continue; }
       const records = selectedLiveRecords(live);
       const fallbackDetail = liveFallbackDetail(live);
       const lastMessage = liveLastMessage(live);
@@ -703,6 +781,7 @@ export function codexDesktopSessions() {
           fallbackDetail,
           lastMessage,
         )];
+      threadEvents.set(thread.rollout_path, { key, events: liveEvents });
       events.push(...liveEvents);
     }
     return events;

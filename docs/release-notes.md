@@ -1,16 +1,17 @@
-# BIG AGENT 0.1.5 preview
+# BIG AGENT 0.1.6 preview
 
-- Random character colours now avoid nearby hues already assigned in the session, while keeping existing identities stable.
-- New transparent character icon for macOS, Windows, and Linux.
-- Larger white activity text when one agent is running, with more room to wrap.
-- Larger text and spacing in the five activity-history rows underneath.
-- Portrait layout adjustments to keep the character clear of the text.
-- Mac installation workaround documented in the README.
+- Session monitoring now runs in a background worker, keeping synchronous database reads off the window's main thread.
+- Lifecycle monitoring reads new log rows instead of repeatedly scanning the full history.
+- Unchanged session data and metadata are reused; unchanged snapshots are not sent to the renderer.
+- Agent rows and activity history avoid unnecessary renders on timer ticks.
+- Cache invalidation handles metadata changes, archived sessions, log resets, and replaced rollout files.
+
+Includes the transparent character icon, larger single-agent text, and separated random character colours from the previous preview.
 
 ## Mac download
 
-Choose **mac-arm64.dmg** for Apple Silicon (M1 or newer), or **mac-x64.dmg** for Intel. Open the DMG and move BIG AGENT into Applications, replacing the old version after quitting it.
+Choose **mac-arm64.dmg** for Apple Silicon (M1 or newer), or **mac-x64.dmg** for Intel. Quit BIG AGENT, open the DMG, and replace the app in Applications.
 
-This preview is still unsigned and not notarised. If macOS reports that the app is damaged or cannot be opened, follow the [unsigned Mac preview instructions](https://github.com/marcodenic/BIGAGENT#opening-the-unsigned-mac-preview).
+This preview remains unsigned and not notarised. If macOS blocks it, follow the [unsigned Mac preview instructions](https://github.com/marcodenic/BIGAGENT#opening-the-unsigned-mac-preview).
 
-All four platforms must pass native automated tests and packaged-app startup checks before publication. SHA256SUMS contains checksums for every installer.
+Native tests and packaged-app startup checks, including monitor-worker startup, must pass on all four platforms before publication. SHA256SUMS contains checksums for every installer.

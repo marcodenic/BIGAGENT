@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { faceHash } from "./components/animatedFaceModel";
 import { FaceVisual } from "./components/FaceVisual";
@@ -438,7 +438,7 @@ function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
   </figure>;
 }
 
-function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
+const AgentLine = memo(function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
   const available = activitySteps(agent, privacy, 80);
   // Public narrative owns the room-scale line. Tool commands remain available
   // in the compact rolling history, where operational detail belongs.
@@ -453,14 +453,14 @@ function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession;
     <AgentPlan plan={agent.state.plan} privacy={privacy} />
     <RollingActivity steps={telemetry} />
   </li>;
-}
+});
 
 function WorkstreamElapsed({ workstream }: { workstream: Workstream }) {
   const now = useClock();
   return <time>{formatElapsed(workstreamElapsed(workstream, now))}</time>;
 }
 
-function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
   const visibleAgents = workstream.agents.slice(0, agentLimit);
   const extra = workstream.agents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
@@ -490,7 +490,16 @@ function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimi
     </ContentFittedActivity>
     <div className="workstream-visual"><WorkstreamElapsed workstream={workstream} /><AgentPreview path={previewPath} privacy={privacy} /></div>
   </article>;
-}
+}, (previous, next) => {
+  if (previous.personality !== next.personality || previous.privacy !== next.privacy
+    || previous.agentLimit !== next.agentLimit || previous.trailLimit !== next.trailLimit) return false;
+  const a = previous.workstream;
+  const b = next.workstream;
+  return a.id === b.id && a.name === b.name && a.status === b.status && a.phase === b.phase
+    && a.label === b.label && a.attention === b.attention && a.startedAt === b.startedAt
+    && a.endedAt === b.endedAt && a.updatedAt === b.updatedAt && a.agents.length === b.agents.length
+    && a.agents.every((agent, index) => agent === b.agents[index]);
+});
 
 function ProviderDiscovery({ providers, busy, onboarding, onAction, onContinue }: {
   providers: ProviderHealth[];
