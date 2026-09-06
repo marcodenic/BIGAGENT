@@ -799,13 +799,14 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .inspection {
   position: absolute;
   z-index: 5;
-  top: clamp(72px, 8vh, 112px);
+  top: auto;
+  max-height: calc(100dvh - 100px);
   right: clamp(20px, 2.8vw, 48px);
-  bottom: clamp(50px, 7vh, 88px);
-  width: min(430px, 44vw);
+  bottom: 76px;
+  width: min(480px, calc(100vw - 40px));
   overflow: auto;
   padding: 26px;
-  background: #121310f4;
+  background: #141611;
   border: 1px solid #30332c;
   box-shadow: -24px 18px 80px #000b;
   font-family: "Geist Mono Variable", monospace;
@@ -868,7 +869,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   .board-count-5 .state-label { font-size: clamp(2.1rem, 14vw, 4.5rem); }
   .agent-step { grid-template-columns: 8px 22px minmax(65px, auto) minmax(0, 1fr); font-size: 9px; }
   .agent-tool, .agent-target { display: none; }
-  .inspection { width: calc(100vw - 40px); right: 20px; top: 68px; bottom: 58px; }
+  .inspection { width: calc(100vw - 40px); right: 20px; top: auto; bottom: 76px; }
 }
 
 @media (max-width: 900px) {
@@ -1048,23 +1049,26 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .app { grid-template-rows: minmax(0, 1fr) auto; }
 .board-controls { justify-self: end; display: flex; align-items: center; gap: 4px; min-height: 44px; color: #b8bcb0; font-size: clamp(14px, 1vw, 20px); }
 .board-controls svg { display: block; width: 22px; height: 22px; flex: none; }
-.board-controls > button, .board-status > summary { min-height: 44px; padding: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 5px; cursor: pointer; }
+.board-controls > button { min-height: 44px; padding: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 5px; cursor: pointer; }
 .board-controls > button { min-width: 44px; }
-.board-controls > button:hover, .board-status > summary:hover { background: #ffffff0c; color: #efeee9; }
+.board-controls > button:hover { background: #ffffff0c; color: #efeee9; }
 .board-controls .is-active, .has-attention .board-status { color: var(--active); }
 .board-controls :focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
 .board-status { position: relative; }
-.board-status > summary { list-style: none; user-select: none; }
-.board-status > summary::-webkit-details-marker { display: none; }
-.board-status-detail { position: absolute; bottom: calc(100% + 10px); right: 0; width: min(380px, calc(100vw - 32px)); padding: 18px; background: #141611; border: 1px solid #45493d; border-radius: 8px; z-index: 15; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
-.board-status-detail p { margin: 10px 0 0; }
 .board-status.has-feed-error { color: var(--error); }
 @media (max-width: 700px) {
   .board-controls { gap: 0; font-size: 13px; }
-  .board-controls > button, .board-status > summary { padding: 8px; }
+  .board-controls > button { padding: 8px; }
   .board-controls svg { width: 20px; height: 20px; }
-  .board-status-detail { position: fixed; bottom: 64px; right: 16px; }
 }
 .project-heading { -webkit-app-region: drag; }
 .board-controls { position: relative; z-index: 7; }
 .has-attention .board-status { color: var(--attention); }
+
+.inspection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.inspection-heading button { min-width: 44px; min-height: 44px; font-size: 24px; }
+.inspection-status { padding-bottom: 12px; border-bottom: 1px solid #30332c; font-size: 14px; line-height: 1.5; }
+.inspection .quiet { color: #a6aa9e; font-size: 13px; }
+.inspection article { font-size: 14px; overflow-wrap: anywhere; }
+.inspection article b, .inspection h3 { font-size: 12px; }
+.inspection :focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }

@@ -2,7 +2,7 @@
 
 An ambient, room-scale departures board for autonomous coding agents. BIG AGENT groups live sessions into stable workstreams, shows useful narrative activity instead of raw token streams, and makes completion, failure and requests for input visible from across the room.
 
-![BIG AGENT showing three live coding workstreams in different lifecycle states](docs/images/demo-workstreams.webp)
+![BIG AGENT showing two coding workstreams with animated characters and a nested subagent team](docs/images/demo-workstreams.webp)
 
 > **Public alpha:** Linux x64 is locally validated. Windows x64 and macOS (Apple Silicon and Intel) now have native build and test workflows; they remain preview targets until those runs and native checks pass. See [platform support](docs/cross-platform.md).
 
@@ -75,7 +75,7 @@ See [PRIVACY.md](PRIVACY.md) for the exact local files used by optional integrat
 
 ## Controls
 
-`F` fullscreen · `Esc` exit fullscreen · `I` inspection · `?` shortcuts. Open **AGENTS** to add, verify or remove provider integrations.
+`F` fullscreen · `Esc` exit fullscreen · `I` activity and status · `?` shortcuts. Open **Agent connections** to add, verify or remove provider integrations.
 
 ## Develop
 
@@ -108,7 +108,7 @@ Completed agents remain visible as DONE for 20 seconds, including when other wor
 
 ## Run recap
 
-Once every participant in an observed run finishes, BIG AGENT shows ALL DONE with the total number of distinct agents and elapsed wall time. The familiar workstream characters celebrate briefly, then settle into happy expressions. Grouped agents share their workstream character with an agent count; names stay in INSPECT. Early finishers remain included after their live rows expire. The recap stays until new work begins and does not keep the screen awake. Waiting, errors, and missing feeds are never treated as successful completion.
+Once every participant in an observed run finishes, BIG AGENT shows ALL DONE with the total number of distinct agents and elapsed wall time. The familiar workstream characters celebrate briefly, then settle into happy expressions. Grouped agents share their workstream character with an agent count; names stay in Activity and status. Early finishers remain included after their live rows expire. The recap stays until new work begins and does not keep the screen awake. Waiting, errors, and missing feeds are never treated as successful completion.
 
 SAVE IMAGE downloads an anonymous PNG of the characters, count, duration, and BIG AGENT branding. It excludes project names and activity details. Recaps remain in memory only and reset when the app restarts.
 

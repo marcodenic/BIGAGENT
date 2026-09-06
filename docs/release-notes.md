@@ -1,11 +1,9 @@
-# BIG AGENT 0.1.8 preview
+# BIG AGENT 0.1.9 preview
 
-- Subagents now appear as selectable baby bots inside their parent task. Larger boards keep each family together instead of splitting children into separate session tiles.
-- Baby bots share their parent's shape, use stable colours based on declared roles, and show their nickname, readable assignment, model, and reasoning effort.
-- Internal Codex approval reviewers no longer appear as extra working or completed agents.
-- Single-task layouts scale characters, activity text, and spacing to the available screen area. Team entries adapt to smaller windows and crowded boards, with scrolling and expansion for additional detail.
-- A compact status and control dock replaces the full-width header and footer. Connections, fullscreen, inspection, privacy, and detailed feed status remain accessible.
-- Save image now opens a native save dialog for the anonymous completion PNG and confirms the saved path or cancellation.
+- A richer violet app icon improves contrast against pale dock backgrounds on Mac, Windows, and Linux.
+- Activity and display status now share one panel, opened from the pulse and task-count button. The separate search icon and overlapping status popover are gone.
+- The combined panel has an opaque background, larger activity text, privacy and feed status, and close-button and Escape-key support.
+- The README now shows full bot characters and a nested subagent team, with realistic, staggered demo start times.
 
 ## Mac download
 

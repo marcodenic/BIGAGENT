@@ -582,11 +582,10 @@ function OperationalReady() {
   </section>;
 }
 
-function ControlIcon({ name }: { name: "connections" | "fullscreen" | "inspect" | "lock" | "unlock" | "status" }) {
+function ControlIcon({ name }: { name: "connections" | "fullscreen" | "lock" | "unlock" | "status" }) {
   const paths = {
     connections: "M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4",
     fullscreen: "M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5",
-    inspect: "M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm5 12 6 6",
     lock: "M6 10h12v11H6V10Zm2 0V6a4 4 0 0 1 8 0v4",
     unlock: "M6 10h12v11H6V10Zm2 0V6a4 4 0 0 1 8 0",
     status: "M3 12h4l3-8 4 16 3-8h4",
@@ -614,7 +613,6 @@ function App() {
   const viewport = useViewport();
   const workstreams = useMemo(() => groupWorkstreams(sessions, now), [sessions, now]);
   const {
-    activeAgents,
     liveWorkstreams,
     liveAgents,
     attentionCount,
@@ -706,8 +704,8 @@ function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "f") toggleAppFullscreen().catch(() => undefined);
-      if (event.key === "Escape") { exitAppFullscreen().catch(() => undefined); setHelp(false); setProviderSetupOpen(false); }
-      if (event.key.toLowerCase() === "i") setInspection((value) => !value);
+      if (event.key === "Escape") { exitAppFullscreen().catch(() => undefined); setHelp(false); setProviderSetupOpen(false); setInspection(false); }
+      if (event.key.toLowerCase() === "i") { setProviderSetupOpen(false); setInspection((value) => !value); }
       if (event.key === "?") setHelp((value) => !value);
     };
     window.addEventListener("keydown", onKey);
@@ -734,18 +732,17 @@ function App() {
       : <OperationalReady />}
 
     <nav className="board-controls" aria-label="Display controls">
-      <details className={`board-status ${syncError ? "has-feed-error" : ""}`}>
-        <summary title="Display status"><ControlIcon name="status" /><span>{syncError ? "Feed issue" : providerSetupOpen ? "Connections" : showRecap ? "Run complete" : liveWorkstreams.length ? `${plural(liveWorkstreams.length, "task", "tasks")} · ${plural(liveAgents.length, "agent", "agents")}` : "Ready"}</span></summary>
-        <div className="board-status-detail"><b>BIG AGENT</b><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p>{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
-      </details>
+      <button className={`board-status ${inspection ? "is-active" : ""} ${syncError ? "has-feed-error" : ""}`} onClick={() => { setProviderSetupOpen(false); setInspection(value => !value); }} aria-label="Activity and status" aria-expanded={inspection} aria-controls="activity-panel" title="Activity and status (I)">
+        <ControlIcon name="status" /><span>{syncError ? "Feed issue" : providerSetupOpen ? "Connections" : showRecap ? "Run complete" : liveWorkstreams.length ? `${plural(liveWorkstreams.length, "task", "tasks")} · ${plural(liveAgents.length, "agent", "agents")}` : "Ready"}</span>
+      </button>
       <button className={providerSetupOpen ? "is-active" : ""} onClick={() => { setInspection(false); setProviderSetupOpen(value => !value); }} aria-label="Manage agent connections" aria-pressed={providerSetupOpen} title="Agent connections"><ControlIcon name="connections" /></button>
       <button onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Fullscreen (F)"><ControlIcon name="fullscreen" /></button>
-      <button className={inspection ? "is-active" : ""} onClick={() => { setProviderSetupOpen(false); setInspection(value => !value); }} aria-label="Toggle inspection" aria-pressed={inspection} title="Inspect activity (I)"><ControlIcon name="inspect" /></button>
       <button className={privacy ? "is-active" : ""} onClick={() => setPrivacy(value => !value)} aria-label="Toggle privacy" aria-pressed={privacy} title={privacy ? "Privacy on" : "Privacy off"}><ControlIcon name={privacy ? "lock" : "unlock"} /></button>
     </nav>
 
-    {inspection && <aside className="inspection">
-      <div><h2>ACTIVITY</h2><p className="quiet">{showRecap ? `${plural(Object.keys(recap.participants).length, "AGENT")} COMPLETED` : `${plural(workstreams.length, "WORKSTREAM")} · ${plural(activeAgents.length, "ACTIVE AGENT")}`}</p></div>
+    {inspection && <aside className="inspection" id="activity-panel" aria-label="Activity and status">
+      <div className="inspection-heading"><h2>ACTIVITY & STATUS</h2><button onClick={() => setInspection(false)} aria-label="Close activity and status">×</button></div>
+      <div className="inspection-status"><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p className="quiet">{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
       {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : (showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status}</span></article>)}</section>)}
       {!showRecap && workstreams.length === 0 && <p className="quiet">No live activity.</p>}
     </aside>}

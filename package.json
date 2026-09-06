@@ -1,7 +1,7 @@
 {
   "name": "big-agent",
   "private": true,
-  "version": "0.1.8",
+  "version": "0.1.9",
   "desktopName": "big-agent",
   "description": "An ambient room-scale display for autonomous agents",
   "author": "BIG AGENT contributors",
