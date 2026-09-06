@@ -661,8 +661,8 @@ function recordEvent(
     label = "DONE";
     if (detail === "Codex desktop task active") detail = "Codex task complete";
   } else if (turnStatus === "interrupted") {
-    status = "error";
-    phase = "failed";
+    status = "stopped";
+    phase = "idle";
     label = "STOPPED";
     detail = "Codex task was interrupted";
   }
@@ -672,7 +672,7 @@ function recordEvent(
   const activityClass = itemType === "agentMessage" || hasReasoningSummary
     ? "narrative"
     : itemType === "imageView" || itemType === "imageGeneration" ? "visual" : "telemetry";
-  const kind = status === "complete" ? "complete" : status === "error" ? "error" : /plan|todo/i.test(itemType) ? "plan" : itemType === "reasoning" ? "reasoning.summary" : "activity";
+  const kind = status === "stopped" ? "turn.end" : status === "complete" ? "complete" : status === "error" ? "error" : /plan|todo/i.test(itemType) ? "plan" : itemType === "reasoning" ? "reasoning.summary" : "activity";
 
   return {
     version: 1,
@@ -711,7 +711,7 @@ function recordEvent(
 
 export function codexDesktopSnapshot() {
   const active = [...codexDesktopSessions()].reverse()
-    .find((event) => event.status !== "complete" && event.status !== "error");
+    .find((event) => event.status !== "complete" && event.status !== "error" && event.status !== "stopped");
   if (!active) throw new Error("No active Codex desktop task");
   return active;
 }

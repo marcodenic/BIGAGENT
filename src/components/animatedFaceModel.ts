@@ -42,9 +42,33 @@ export function animatedStateForStatus(status: AgentStatus, attention = false, p
     case "editing": return "writing";
     case "testing": return "progress";
     case "waiting": return "listening";
+    case "stopped": return "idle";
     case "complete": return "celebrate";
     default: return "idle";
   }
+}
+
+// Keep specific actions and attention signals literal; only sustained, general
+// activity gets a little personality. The activity label remains authoritative.
+const ACTIVITY_VARIANTS: Partial<Record<AnimatedFaceState, readonly AnimatedFaceState[]>> = {
+  thinking: ["thinking", "curious", "orbit"],
+  searching: ["searching", "radar", "curious"],
+  working: ["working", "orbit", "humming"],
+};
+
+export function hasActivityVariants(state: AnimatedFaceState) {
+  return Boolean(ACTIVITY_VARIANTS[state]);
+}
+
+export function activityVariant(state: AnimatedFaceState, personality: number, step: number): AnimatedFaceState {
+  const pool = ACTIVITY_VARIANTS[state];
+  if (!pool) return state;
+  const offset = faceHash(`${personality}:${state}`) % pool.length;
+  return pool[(offset + step) % pool.length];
+}
+
+export function activityVariantDelay(state: AnimatedFaceState, personality: number, step: number) {
+  return 4000 + faceHash(`${personality}:${state}:${step}:delay`) % 3001;
 }
 
 const SHAPES: readonly AnimatedFaceShape[] = ["blob", "pebble", "bean", "egg", "squircle", "tablet", "capsule", "cylinder", "hex", "gem", "crystal", "wedge", "shield", "dome", "arch", "cloud", "teardrop", "leaf"];

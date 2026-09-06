@@ -43,6 +43,7 @@ const statusPriority: Record<AgentStatus, number> = {
   working: 45,
   idle: 10,
   complete: 0,
+  stopped: 0,
 };
 
 const activeStatuses = new Set<AgentStatus>([
@@ -133,14 +134,14 @@ export function replaceSessionSource(
   // Preserve older display history without allowing it to mutate rebuilt state.
   for (const [id, session] of Object.entries(next)) {
     if (session.source !== source || !previous[id] || previous[id].runId !== session.runId) continue;
-    if (session.state.status === "complete" && previous[id].state.status === "complete") {
+    if ((session.state.status === "complete" || session.state.status === "stopped") && previous[id].state.status === session.state.status) {
       session.state.endedAt = previous[id].state.endedAt;
     }
     const seen = new Set<string>();
     session.state.recent = [...session.state.recent, ...previous[id].state.recent].filter((event) => !seen.has(event.id) && Boolean(seen.add(event.id))).slice(0, 80);
   }
   for (const [id, session] of Object.entries(previous)) {
-    if (!next[id] && session.state.status === "complete" && now - (session.state.endedAt ?? session.updatedAt) <= 20_000) next[id] = session;
+    if (!next[id] && (session.state.status === "complete" || session.state.status === "stopped") && now - (session.state.endedAt ?? session.updatedAt) <= 20_000) next[id] = session;
   }
   return next;
 }
@@ -172,9 +173,9 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
     // session in reducer state so a later turn can resume it, but omit it from
     // the board until new activity arrives.
     if (session.state.status === "idle") return false;
-    // Successful completion is ambient and expires. Errors remain visible
+    // Completion and user interruption expire. Genuine errors remain visible
     // until the same session resumes or an authoritative snapshot removes it.
-    if (session.state.status !== "complete") return true;
+    if (session.state.status !== "complete" && session.state.status !== "stopped") return true;
     return now - (session.state.endedAt ?? session.updatedAt) <= completedTtlMs;
   });
   const grouped = new Map<string, AgentSession[]>();
@@ -218,7 +219,7 @@ export function activeBoardWorkstreams(workstreams: Workstream[]) {
   // Otherwise the board suppresses the root completion summary and hides DONE
   // roots beside failed agents or recently completed turns/children.
   const needsBoard = workstreams.some((workstream) => workstream.agents.some((agent) =>
-    activeStatuses.has(agent.state.status) || agent.state.status === "error"
+    activeStatuses.has(agent.state.status) || agent.state.status === "error" || agent.state.status === "stopped"
     || (agent.state.status === "complete" && (agent.state.completionScope === "turn" || Boolean(agent.parentSessionId)))));
   return needsBoard ? workstreams : [];
 }

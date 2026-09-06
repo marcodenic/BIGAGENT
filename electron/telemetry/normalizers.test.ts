@@ -7,6 +7,16 @@ function envelope(format: TelemetryEnvelope["format"], payload: unknown, source 
 }
 
 describe("telemetry normalization", () => {
+  it("distinguishes stopped Codex turns from genuine failures across transports", () => {
+    for (const format of ["codex-app-server", "codex-json"] as const) {
+      for (const status of ["interrupted", "cancelled", "aborted"]) {
+        const [event] = normalizeTelemetry(envelope(format, { method: "turn/completed", params: { threadId: "a", turn: { id: "b", status } } }));
+        expect(event).toMatchObject({ status: "stopped", kind: "turn.end", label: "STOPPED" });
+      }
+      const [failed] = normalizeTelemetry(envelope(format, { method: "turn/completed", params: { threadId: "a", turn: { id: "b", status: "failed" } } }));
+      expect(failed).toMatchObject({ status: "error", kind: "error" });
+    }
+  });
   it("maps compatible lifecycle hooks without retaining prompt contents", () => {
     const [event] = normalizeTelemetry(envelope("hook", {
       hook_event_name: "SubagentStart",

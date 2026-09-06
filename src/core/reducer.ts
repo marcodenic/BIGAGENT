@@ -9,7 +9,7 @@ export interface DisplayState {
   completionScope: CompletionScope; usage?: AgentEvent["usage"];
 }
 export const initialState: DisplayState = { status: "idle", label: "READY", detail: "Waiting for an agent", files: [], plan: [], recent: [], startedAt: null, stateSince: Date.now(), endedAt: null, attention: false, error: null, sessionName: "ambient session", project: "BIG AGENT", branch: "main", command: "", tool: "", target: "", phase: "idle", completionScope: "none" };
-const labels: Record<AgentStatus, string> = { idle: "READY", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "RUNNING", editing: "EDITING", testing: "RUNNING TESTS", waiting: "NEEDS YOU", approval: "NEEDS YOU", complete: "DONE", error: "SOMETHING BROKE" };
+const labels: Record<AgentStatus, string> = { idle: "READY", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "RUNNING", editing: "EDITING", testing: "RUNNING TESTS", waiting: "NEEDS YOU", approval: "NEEDS YOU", complete: "DONE", stopped: "STOPPED", error: "SOMETHING BROKE" };
 const active = new Set<AgentStatus>(["thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval"]);
 export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.now()): DisplayState {
   if (state.recent.some((x) => x.id === event.id)) return state;
@@ -43,7 +43,8 @@ export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.n
   if (event.kind === "session.end" || event.kind === "complete") next.completionScope = "session";
   else if (event.kind === "turn.end" && status === "complete") next.completionScope = "turn";
   else if (event.kind === "session.start" || event.kind === "turn.start" || active.has(status) || status === "error") next.completionScope = "none";
-  if (status === "error") next.phase = "failed";
+  if (status === "stopped") { next.phase = "idle"; next.completionScope = "none"; }
+  else if (status === "error") next.phase = "failed";
   else if (event.kind === "turn.end" && status === "complete") next.phase = "completing";
   else if (status === "complete" && event.phase === undefined) next.phase = "completing";
   // A protocol producer may omit explicit session boundaries; the first active status still starts a useful timer.

@@ -1,12 +1,9 @@
-# BIG AGENT 0.1.6 preview
+# BIG AGENT 0.1.7 preview
 
-- Session monitoring now runs in a background worker, keeping synchronous database reads off the window's main thread.
-- Lifecycle monitoring reads new log rows instead of repeatedly scanning the full history.
-- Unchanged session data and metadata are reused; unchanged snapshots are not sent to the renderer.
-- Agent rows and activity history avoid unnecessary renders on timer ticks.
-- Cache invalidation handles metadata changes, archived sessions, log resets, and replaced rollout files.
-
-Includes the transparent character icon, larger single-agent text, and separated random character colours from the previous preview.
+- Thinking, searching, and general work each rotate through three character animations every 4–7 seconds, with staggered timing for each character.
+- Animation rotation pauses offscreen and respects reduced-motion preferences. Specific actions and attention signals keep their clear expressions.
+- User-stopped Codex sessions now show a neutral STOPPED state instead of an error, then disappear after 20 seconds.
+- Stopped-session expiry uses the original stop time, so refreshing or restarting does not bring old stopped sessions back. Genuine errors remain visible.
 
 ## Mac download
 

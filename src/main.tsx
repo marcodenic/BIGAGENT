@@ -69,7 +69,7 @@ function providerHealthList(value: unknown): ProviderHealth[] {
 
 const activityLabels: Record<AgentStatus, string> = {
   idle: "IDLE", thinking: "THINKING", searching: "SEARCHING", working: "WORKING", command: "TOOL",
-  editing: "EDITING", testing: "TESTING", waiting: "WAITING", approval: "APPROVAL", complete: "DONE", error: "ERROR",
+  editing: "EDITING", testing: "TESTING", waiting: "WAITING", approval: "APPROVAL", complete: "DONE", stopped: "STOPPED", error: "ERROR",
 };
 
 function useClock() {

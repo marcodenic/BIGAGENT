@@ -37,6 +37,15 @@ function fixture() {
   const log = (thread: string, body: string | null, target = "codex_core::session::turn") => logs.prepare("INSERT INTO logs VALUES (?, ?, ?, ?, ?)").run(thread, Date.now() / 1000, 0, target, body);
   return { state, logs, add, log, record };
 }
+it("reports user interruption as stopped with its original terminal time", () => {
+  const { add, record } = fixture();
+  const path = add("stopped");
+  appendFileSync(path, record({ type: "task_interrupted", turn_id: "stopped" }));
+  const event = codexDesktopSessions().find(event => (event.meta as any).threadId === "stopped")!;
+  expect(event).toMatchObject({ status: "stopped", kind: "turn.end", label: "STOPPED", phase: "idle" });
+  expect((event.meta as any).completedAtMs).toBeLessThan(Date.now());
+});
+
 it("reuses unchanged sessions but refreshes changed files and metadata", () => {
   const { add, state, record } = fixture();
   const firstPath = add("a1");

@@ -605,6 +605,7 @@ function codexEvents(envelope: TelemetryEnvelope) {
   if (/turncompleted|turncomplete/.test(eventType)) {
     const status = key(turn.status || params.status);
     if (/fail|error/.test(status)) return [makeEvent(envelope, basePayload, "error", "error", { ...common, phase: "failed", detail: text(nested(turn, "error").message) || "Codex stopped with an error" })];
+    if (/interrupt|cancel|abort/.test(status)) return [makeEvent(envelope, basePayload, "stopped", "turn.end", { ...common, phase: "idle", label: "STOPPED", detail: "Codex turn was stopped" })];
     if (envelope.format === "codex-json") return [makeEvent(envelope, basePayload, "complete", "session.end", { ...common, phase: "completing", detail: /interrupt/.test(status) ? "Codex was interrupted" : "Codex completed" })];
     return [makeEvent(envelope, basePayload, "idle", "turn.end", { ...common, phase: "idle", label: "READY", detail: /interrupt/.test(status) ? "Codex turn interrupted" : "Codex turn completed" })];
   }

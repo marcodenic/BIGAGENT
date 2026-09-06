@@ -85,6 +85,7 @@ header button.agents-toggle { opacity: 1; }
 .workstream:last-child { border-bottom: 0; }
 .workstream.status-waiting, .workstream.status-approval { --status-color: var(--attention); }
 .workstream.status-complete { --status-color: var(--complete); opacity: .7; }
+.workstream.status-stopped { --status-color: #8b8e84; opacity: .7; }
 .workstream.status-error { --status-color: var(--error); }
 
 .workstream-identity { align-self: stretch; display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; }

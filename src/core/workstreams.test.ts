@@ -7,6 +7,18 @@ function event(sessionId: string, threadId: string, status: "thinking" | "testin
 }
 
 describe("workstream projection", () => {
+  it("expires stopped sessions after 20 seconds, including replay after restart", () => {
+    const stopped = normalizeSimpleEvent({ status: "stopped", meta: { sessionId: "stop", turnId: "turn", completedAtMs: 1000 } }, "stop-event");
+    let sessions = replaceSessionSource({}, "codex", [stopped], 1000);
+    expect(sessions.stop.state).toMatchObject({ status: "stopped", label: "STOPPED", attention: false, error: null, endedAt: 1000, completionScope: "none" });
+    expect(activeBoardWorkstreams(groupWorkstreams(sessions, 2000))).toHaveLength(1);
+    sessions = replaceSessionSource(sessions, "codex", [stopped], 15000);
+    expect(sessions.stop.state.endedAt).toBe(1000);
+    expect(groupWorkstreams(sessions, 21001)).toHaveLength(0);
+    expect(groupWorkstreams(replaceSessionSource({}, "codex", [stopped], 60000), 60000)).toHaveLength(0);
+    const resumed = normalizeSimpleEvent({ status: "thinking", meta: { sessionId: "stop", turnId: "next" } }, "resume");
+    expect(groupWorkstreams(applySessionEvent(sessions, resumed, 61000, "codex"), 61000)[0].status).toBe("thinking");
+  });
   it("shows completed roots in other workstreams while work continues", () => {
     let sessions = applySessionEvent({}, event("live", "one", "thinking", "Working"), 1_000);
     sessions = applySessionEvent(sessions, event("done", "two", "complete", "Finished"), 2_000);
@@ -78,7 +90,7 @@ describe("workstream projection", () => {
   });
 
   it("does not let a stopped sibling override a live agent", () => {
-    const stopped = normalizeSimpleEvent({ status: "error", label: "STOPPED", detail: "Interrupted", meta: { sessionId: "old", threadId: "project", workstreamName: "PROPER LINUX" } }, "stopped");
+    const stopped = normalizeSimpleEvent({ status: "stopped", label: "STOPPED", detail: "Interrupted", meta: { sessionId: "old", threadId: "project", workstreamName: "PROPER LINUX" } }, "stopped");
     const running = normalizeSimpleEvent({ status: "thinking", detail: "Continuing work", meta: { sessionId: "live", threadId: "project", workstreamName: "PROPER LINUX" } }, "running");
     let sessions = applySessionEvent({}, stopped, 1_000, "codex");
     sessions = applySessionEvent(sessions, running, 2_000, "codex");

@@ -1,5 +1,5 @@
 /** Public, agent-neutral event protocol. Never includes private reasoning. */
-export type AgentStatus = "idle" | "thinking" | "searching" | "working" | "command" | "editing" | "testing" | "waiting" | "approval" | "complete" | "error";
+export type AgentStatus = "idle" | "thinking" | "searching" | "working" | "command" | "editing" | "testing" | "waiting" | "approval" | "complete" | "stopped" | "error";
 /** Provider-neutral activity detail. Status remains the compact UI grouping. */
 export type AgentPhase = "idle" | "starting" | "planning" | "searching" | "executing" | "editing" | "testing" | "waiting" | "responding" | "delegating" | "retrying" | "receiving" | "uploading" | "notifying" | "completing" | "failed";
 export type EventKind = "session.start" | "session.end" | "turn.start" | "turn.end" | "activity" | "reasoning.summary" | "plan" | "command.start" | "command.end" | "files.changed" | "test.result" | "approval.requested" | "input.requested" | "error" | "complete" | "usage";
@@ -10,7 +10,7 @@ export interface AgentEvent {
   plan?: string[]; usage?: { inputTokens?: number; outputTokens?: number }; meta?: Record<string, unknown>;
 }
 
-export const statuses: AgentStatus[] = ["idle", "thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval", "complete", "error"];
+export const statuses: AgentStatus[] = ["idle", "thinking", "searching", "working", "command", "editing", "testing", "waiting", "approval", "complete", "stopped", "error"];
 export function isAgentEvent(value: unknown): value is AgentEvent {
   if (!value || typeof value !== "object") return false;
   const e = value as Partial<AgentEvent>;
@@ -20,6 +20,6 @@ export function isAgentEvent(value: unknown): value is AgentEvent {
 /** Convenience JSONL shape accepted by `big-agent emit` and the local protocol. */
 export interface SimpleEvent { status: AgentStatus; label?: string; detail?: string; phase?: AgentPhase; files?: string[]; plan?: string[]; command?: string; tool?: string; target?: string; exitCode?: number; meta?: Record<string, unknown> }
 export function normalizeSimpleEvent(value: SimpleEvent, id: string = crypto.randomUUID()): AgentEvent {
-  const kind: EventKind = value.status === "complete" ? "complete" : value.status === "error" ? "error" : value.status === "approval" ? "approval.requested" : value.status === "waiting" ? "input.requested" : value.status === "command" ? "command.start" : value.status === "editing" ? "files.changed" : "activity";
+  const kind: EventKind = value.status === "stopped" ? "turn.end" : value.status === "complete" ? "complete" : value.status === "error" ? "error" : value.status === "approval" ? "approval.requested" : value.status === "waiting" ? "input.requested" : value.status === "command" ? "command.start" : value.status === "editing" ? "files.changed" : "activity";
   return { version: 1, id, timestamp: new Date().toISOString(), kind, ...value };
 }
