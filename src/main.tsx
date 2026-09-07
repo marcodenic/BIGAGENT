@@ -37,6 +37,7 @@ import {
 import "./styles.css";
 import { advanceRunRecap, type RunRecap } from "./core/runRecap";
 import { RunCelebration } from "./components/RunCelebration";
+import { useCompletionSound } from "./components/useCompletionSound";
 
 const PROVIDER_ONBOARDING_KEY = "big-agent.provider-onboarding.v1";
 const providerIds = ["codex", "claude", "grok", "cursor", "gemini", "copilot", "windsurf", "opencode"] as const;
@@ -582,8 +583,10 @@ function OperationalReady() {
   </section>;
 }
 
-function ControlIcon({ name }: { name: "connections" | "fullscreen" | "lock" | "unlock" | "status" }) {
+function ControlIcon({ name }: { name: "connections" | "fullscreen" | "lock" | "unlock" | "status" | "sound" | "muted" }) {
   const paths = {
+    sound: "M11 4 6 8H3v8h3l5 4V4Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14",
+    muted: "M11 4 6 8H3v8h3l5 4V4Zm5 5 5 6m0-6-5 6",
     connections: "M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0V8Zm6 9v4",
     fullscreen: "M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5",
     lock: "M6 10h12v11H6V10Zm2 0V6a4 4 0 0 1 8 0v4",
@@ -609,6 +612,7 @@ function App() {
   const [providerBusy, setProviderBusy] = useState("");
   const [providerOnboardingDone, setProviderOnboardingDone] = useState(providerOnboardingComplete);
   const [providerSetupOpen, setProviderSetupOpen] = useState(() => !providerOnboardingComplete());
+  const completionSound = useCompletionSound(recap?.status, Boolean(showRecap) && !providerSetupOpen);
   const now = useClock();
   const viewport = useViewport();
   const workstreams = useMemo(() => groupWorkstreams(sessions, now), [sessions, now]);
@@ -737,11 +741,13 @@ function App() {
       </button>
       <button className={providerSetupOpen ? "is-active" : ""} onClick={() => { setInspection(false); setProviderSetupOpen(value => !value); }} aria-label="Manage agent connections" aria-pressed={providerSetupOpen} title="Agent connections"><ControlIcon name="connections" /></button>
       <button onClick={() => toggleAppFullscreen().catch(() => undefined)} aria-label="Toggle fullscreen" title="Fullscreen (F)"><ControlIcon name="fullscreen" /></button>
+      <button onClick={completionSound.toggle} aria-label="Completion sound" aria-pressed={completionSound.enabled} title={completionSound.enabled ? "Completion sound on" : "Completion sound off"}><ControlIcon name={completionSound.enabled ? "sound" : "muted"} /></button>
       <button className={privacy ? "is-active" : ""} onClick={() => setPrivacy(value => !value)} aria-label="Toggle privacy" aria-pressed={privacy} title={privacy ? "Privacy on" : "Privacy off"}><ControlIcon name={privacy ? "lock" : "unlock"} /></button>
     </nav>
 
     {inspection && <aside className="inspection" id="activity-panel" aria-label="Activity and status">
       <div className="inspection-heading"><h2>ACTIVITY & STATUS</h2><button onClick={() => setInspection(false)} aria-label="Close activity and status">×</button></div>
+      <div className="completion-sound-controls"><span>Completion sound {completionSound.enabled ? "on" : "off"}</span><button onClick={() => void completionSound.preview()}>Preview chime</button>{completionSound.error && <p role="status">{completionSound.error}</p>}</div>
       <div className="inspection-status"><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p className="quiet">{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
       {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : (showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status}</span></article>)}</section>)}
       {!showRecap && workstreams.length === 0 && <p className="quiet">No live activity.</p>}

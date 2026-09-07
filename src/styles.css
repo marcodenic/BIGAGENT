@@ -1068,6 +1068,10 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .inspection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .inspection-heading button { min-width: 44px; min-height: 44px; font-size: 24px; }
 .inspection-status { padding-bottom: 12px; border-bottom: 1px solid #30332c; font-size: 14px; line-height: 1.5; }
+.completion-sound-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 12px; font-size: 14px; }
+.completion-sound-controls button { padding: 8px 12px; border: 1px solid #484c40; border-radius: 5px; cursor: pointer; }
+.completion-sound-controls button:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.completion-sound-controls p { flex-basis: 100%; }
 .inspection .quiet { color: #a6aa9e; font-size: 13px; }
 .inspection article { font-size: 14px; overflow-wrap: anywhere; }
 .inspection article b, .inspection h3 { font-size: 12px; }

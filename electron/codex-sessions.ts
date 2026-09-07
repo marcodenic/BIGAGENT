@@ -564,7 +564,7 @@ function recordEvent(
   let status = "thinking";
   let phase = "planning";
   let label = "THINKING";
-  let detail = "Codex desktop task active";
+  let detail = "Waiting for agent…";
   let files: string[] = [];
   let command: string | undefined;
   let tool: string | undefined;
@@ -672,7 +672,7 @@ function recordEvent(
     status = "complete";
     phase = "completing";
     label = "DONE";
-    if (detail === "Codex desktop task active") detail = "Codex task complete";
+    if (detail === "Waiting for agent…") detail = "Codex task complete";
   } else if (turnStatus === "interrupted") {
     status = "stopped";
     phase = "idle";

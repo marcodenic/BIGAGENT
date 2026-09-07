@@ -1,9 +1,9 @@
-# BIG AGENT 0.1.9 preview
+# BIG AGENT 0.1.10 preview
 
-- A richer violet app icon improves contrast against pale dock backgrounds on Mac, Windows, and Linux.
-- Activity and display status now share one panel, opened from the pulse and task-count button. The separate search icon and overlapping status popover are gone.
-- The combined panel has an opaque background, larger activity text, privacy and feed status, and close-button and Escape-key support.
-- The README now shows full bot characters and a nested subagent team, with realistic, staggered demo start times.
+- A three-note airport chime now plays once when all agents finish a run, with a lower pitch and gentle volume.
+- A speaker button turns completion sound on or off and remembers the preference after restarting. Muting stops a playing chime immediately.
+- Activity & status includes a Preview chime button. Reopening the done screen or enabling sound after completion does not replay the notification.
+- The generic Codex activity fallback now reads “Waiting for agent…”.
 
 ## Mac download
 

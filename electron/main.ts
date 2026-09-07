@@ -257,6 +257,7 @@ async function createWindow() {
       ? app.isPackaged ? join(process.resourcesPath, "icon.png") : join(__dirname, "../../electron/assets/icon.png")
       : undefined,
     webPreferences: {
+      autoplayPolicy: "no-user-gesture-required",
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
