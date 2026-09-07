@@ -36,6 +36,10 @@ describe("Claude HTTP hook setup", () => {
 });
 
 describe("Claude registry transitions and shared hook groups", () => {
+  it("does not invent activity for an unknown registry state", () => {
+    expect(claudeRegistryEvent({ sessionId: "session-1", state: "unknown" })).toBeUndefined();
+  });
+
   it("delivers repeated working and blocked states as new observations", async () => {
     const { TelemetryHub } = await import("../telemetry/hub");
     const hub = new TelemetryHub();

@@ -1,3 +1,5 @@
+import { claudeRegistryEvent } from "../../electron/providers/claude";
+import { elapsedMs } from "./reducer";
 import { describe, expect, it } from "vitest";
 import { normalizeTelemetry, type TelemetryEnvelope } from "../../electron/telemetry/normalizers";
 import type { AgentEvent } from "./protocol";
@@ -12,6 +14,32 @@ function apply(sessions: Record<string, AgentSession>, event: AgentEvent, now: n
 }
 
 describe("end-to-end lifecycle projection", () => {
+  it.each(["state", "status"])("keeps an initially idle registry session off the board (%s)", (field) => {
+    const event = claudeRegistryEvent({ sessionId: "session-1", [field]: "idle", startedAt: 1 })!;
+    expect(event).toMatchObject({ status: "idle", kind: "turn.end", phase: "idle", label: "READY" });
+    const sessions = applySessionEvent({}, event, 100_000, "claude-agents");
+    expect(groupWorkstreams(sessions, 100_000)).toEqual([]);
+    expect(elapsedMs(sessions["session-1"].state, 200_000)).toBe(0);
+  });
+
+  it("ends observed work on idle and starts a fresh timer when work resumes", () => {
+    let sessions: Record<string, AgentSession> = {};
+    let previous: string | undefined;
+    const observe = (state: string, now: number) => {
+      const event = claudeRegistryEvent({ sessionId: "session-1", state, startedAt: 1 }, previous)!;
+      sessions = applySessionEvent(sessions, event, now, "claude-agents");
+      previous = state;
+    };
+    observe("working", 1_000);
+    observe("idle", 2_000);
+    expect(sessions["session-1"].state).toMatchObject({ status: "complete", completionScope: "turn", endedAt: 2_000 });
+    expect(groupWorkstreams(sessions, 22_001)).toEqual([]);
+    observe("working", 30_000);
+    expect(sessions["session-1"].state).toMatchObject({ status: "thinking", startedAt: 30_000, endedAt: null });
+    expect(elapsedMs(sessions["session-1"].state, 31_000)).toBe(1_000);
+  });
+
+
   it("leaves RUNNING TESTS on command completion and accepts reasoning without text", () => {
     let sessions: Record<string, AgentSession> = {};
     const item = (method: string, item: Record<string, unknown>) => normalize("codex-app-server", {

@@ -49,7 +49,7 @@ These commands apply only to BIG AGENT; they do not disable Gatekeeper system-wi
 | Provider | Observation source |
 | --- | --- |
 | Codex | Local session files + App Server daemon |
-| Claude Code | HTTP hooks + agent registry |
+| Claude Code (Desktop local Code sessions + CLI) | HTTP hooks + agent registry |
 | Grok Build | HTTP lifecycle hooks |
 | Cursor | Thought + lifecycle hooks |
 | Gemini CLI | Lifecycle hooks + OpenTelemetry |

@@ -1,9 +1,8 @@
-# BIG AGENT 0.1.10 preview
+# BIG AGENT 0.1.11 preview
 
-- A three-note airport chime now plays once when all agents finish a run, with a lower pitch and gentle volume.
-- A speaker button turns completion sound on or off and remembers the preference after restarting. Muting stops a playing chime immediately.
-- Activity & status includes a Preview chime button. Reopening the done screen or enabling sound after completion does not replay the notification.
-- The generic Codex activity fallback now reads “Waiting for agent…”.
+- Fixed idle Claude registry sessions incorrectly appearing as THINKING with a continuously running timer. Idle sessions stay off the active board, and resumed work starts a fresh timer.
+- Completion audio waits two seconds and cancels if work resumes, preventing a chime during brief pauses between turns. Muting or hiding the recap also cancels pending audio.
+- Clarified support for local Claude Desktop Code sessions and Claude Code CLI sessions, including CLI sessions launched by another agent. Use SET UP CLAUDE before testing; regular Chat, Cowork, and cloud/remote sessions are not covered.
 
 ## Mac download
 

@@ -146,7 +146,12 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
   let kind: EventKind;
   let label: string;
   let detail: string;
-  if (rawState === "blocked") {
+  if (rawState === "idle") {
+    status = "idle";
+    kind = "turn.end";
+    label = "READY";
+    detail = "Claude is idle";
+  } else if (rawState === "blocked") {
     status = "waiting";
     kind = "input.requested";
     label = "NEEDS YOU";
@@ -166,11 +171,14 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
     kind = "session.end";
     label = "STOPPED";
     detail = "Claude session stopped";
-  } else {
+  } else if (rawState === "working") {
     status = "thinking";
-    kind = previousState ? "activity" : "session.start";
+    kind = !previousState ? "session.start" : ["working", "blocked"].includes(previousState.toLowerCase()) ? "activity" : "turn.start";
     label = "THINKING";
     detail = text(entry.summary, entry.status) || "Claude is working";
+  } else {
+    // Registry presence alone is not evidence of active work.
+    return undefined;
   }
   return {
     version: 1,
@@ -182,7 +190,7 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
     status,
     label,
     detail,
-    phase: rawState === "blocked" ? "waiting" : rawState === "working" ? "planning" : rawState === "failed" ? "failed" : "completing",
+    phase: rawState === "idle" ? "idle" : rawState === "blocked" ? "waiting" : rawState === "working" ? "planning" : rawState === "failed" ? "failed" : "completing",
     meta: {
       source: "claude-agents",
       product: "claude",
@@ -195,7 +203,7 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
       agentName: text(entry.name) || "Claude",
       modelProvider: "anthropic",
       model: text(entry.model) || "claude",
-      startedAtMs: typeof entry.startedAt === "number" ? entry.startedAt : undefined,
+      startedAtMs: !previousState && rawState !== "idle" && typeof entry.startedAt === "number" ? entry.startedAt : undefined,
       lastMessage: rawState === "done" ? text(entry.summary, entry.result) : undefined,
       registryId: entry.id,
       registryState: rawState,
@@ -259,7 +267,7 @@ export class ClaudeProvider {
       configured: this.configured,
       connected: observable,
       listening: this.listening,
-      activeSessions: [...this.previous.values()].filter((entry) => ["working", "blocked"].includes(text(entry.state)?.toLowerCase() ?? "")).length,
+      activeSessions: [...this.previous.values()].filter((entry) => ["working", "blocked"].includes(text(entry.state, entry.status)?.toLowerCase() ?? "")).length,
       detail,
       lastEventAt: this.lastEventAt,
       actions,
@@ -374,7 +382,7 @@ export class ClaudeProvider {
         if (!sessionId) continue;
         current.set(sessionId, entry);
         const previous = this.previous.get(sessionId);
-        if (JSON.stringify(previous) !== JSON.stringify(entry)) this.ingestRegistry(entry, text(previous?.state));
+        if (JSON.stringify(previous) !== JSON.stringify(entry)) this.ingestRegistry(entry, text(previous?.state, previous?.status));
       }
       const missing = [...this.previous.keys()].filter((id) => !current.has(id));
       if (missing.length) await this.reconcileMissing(missing, current);
@@ -402,7 +410,8 @@ export class ClaudeProvider {
     }
     for (const sessionId of missing) {
       const terminal = all.find((entry) => agentSessionId(entry) === sessionId) ?? { ...this.previous.get(sessionId), state: "done" };
-      this.ingestRegistry(terminal, text(this.previous.get(sessionId)?.state));
+      const previous = this.previous.get(sessionId);
+      this.ingestRegistry(terminal, text(previous?.state, previous?.status));
     }
   }
 

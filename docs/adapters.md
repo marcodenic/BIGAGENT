@@ -20,6 +20,8 @@ Codex Desktop must use the same daemon for passive monitoring. On Linux the expl
 
 ### Claude Code
 
+Supports local sessions in Claude Desktop’s **Code** tab and the standalone Claude Code CLI, including CLI sessions launched by another agent. Both read the same user hook settings ([Anthropic documentation](https://code.claude.com/docs/en/desktop#shared-configuration)). Run **SET UP CLAUDE** in BIG AGENT before testing a new session. Desktop hook observation does not require a separately installed CLI; the CLI adds registry reconciliation when available. Regular Chat, Cowork, and cloud/remote sessions are not covered by this local integration.
+
 The explicit **SET UP CLAUDE** action installs official HTTP observation hooks for session, prompt, message, tool, permission, subagent, task, stop, and compaction events. Ordinary startup only inspects the configuration, and **REMOVE INTEGRATION** removes BIG AGENT's entries. Existing Claude settings and hook actions are preserved. The localhost receiver always returns an empty `204`, the documented neutral result, so BIG AGENT cannot affect Claude's behavior. `claude agents --json` supplies an authoritative active-session registry; `--all` is consulted to classify agents that leave the active list.
 
 ### Grok Build
