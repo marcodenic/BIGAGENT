@@ -6,6 +6,8 @@ The local telemetry receiver listens only on `127.0.0.1:19777`. It accepts JSON 
 
 Codex monitoring reads the local `~/.codex/state_5.sqlite`, `logs_2.sqlite`, `session_index.jsonl`, and the session rollout files referenced by the state database. `CODEX_HOME` overrides this directory. These files are opened read-only and monitored automatically; set `BIG_AGENT_CODEX_FALLBACK=0` to disable this monitoring.
 
+When a Claude hook omits its model, BIG AGENT reads up to 256 KB from the end of that session’s transcript under `~/.claude/projects` (`CLAUDE_CONFIG_DIR` overrides the config directory). Subagents use their own transcript in the session’s `subagents` folder. Only the latest matching assistant model name and explicitly reported effort are added to telemetry; transcript messages are not retained or forwarded by this lookup. Missing or unreadable transcripts do not interrupt activity reporting.
+
 Provider configuration changes are opt-in. Depending on what you enable, BIG AGENT may add clearly identifiable entries to:
 
 - `~/.local/share/applications/chatgpt.desktop`

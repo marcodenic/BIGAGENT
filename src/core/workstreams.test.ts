@@ -259,3 +259,8 @@ describe("workstream projection", () => {
     expect(presentation.recentlyDone).toBe(1);
   });
 });
+
+it("displays effort supplied by hook telemetry", () => {
+  const value = normalizeSimpleEvent({ status: "thinking", meta: { sessionId: "claude-child", effort: "high" } }, "effort-event");
+  expect(applySessionEvent({}, value, 1000)["claude-child"].effort).toBe("high");
+});

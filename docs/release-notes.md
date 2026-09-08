@@ -1,8 +1,9 @@
-# BIG AGENT 0.1.11 preview
+# BIG AGENT 0.1.12 preview
 
-- Fixed idle Claude registry sessions incorrectly appearing as THINKING with a continuously running timer. Idle sessions stay off the active board, and resumed work starts a fresh timer.
-- Completion audio waits two seconds and cancels if work resumes, preventing a chime during brief pauses between turns. Muting or hiding the recap also cancels pending audio.
-- Clarified support for local Claude Desktop Code sessions and Claude Code CLI sessions, including CLI sessions launched by another agent. Use SET UP CLAUDE before testing; regular Chat, Cowork, and cloud/remote sessions are not covered.
+- Recover Claude model identity from local session transcripts when startup metadata is missing, including subagents’ own transcripts.
+- Display explicitly reported effort from hook telemetry and matching transcript metadata.
+- Remove Codex realtime inline markers from displayed messages and recaps.
+- Transcript lookup stays local, bounded, and read-only; missing metadata never interrupts activity reporting.
 
 ## Mac download
 

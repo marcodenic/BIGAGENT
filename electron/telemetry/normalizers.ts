@@ -126,7 +126,7 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     agentTaskTitle: text(payload.agentTaskTitle, extra.agentTaskTitle),
     modelProvider: text(model.provider, payload.model_provider, payload.modelProvider, extra.modelProvider, envelope.product),
     model: text(model.id, model.name, payload.model_id, payload.modelId, payload.model_name, payload.modelName, payload.model, extra.model),
-    effort: text(payload.reasoning_effort, payload.reasoningEffort, effort?.value, extra.effort),
+    effort: text(payload.reasoning_effort, payload.reasoningEffort, payload.effort, nested(payload, "output_config").effort, effort?.value, extra.effort),
     ...extra,
   };
 }

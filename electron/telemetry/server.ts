@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { enrichClaudeModel } from "./claude-model";
 import { telemetryPort } from "./endpoint";
 import { TelemetryHub } from "./hub";
 import type { TelemetryEnvelope, TelemetryFormat } from "./normalizers";
@@ -116,7 +117,9 @@ export function createTelemetryServer(hub: TelemetryHub) {
         json(response, 404, { status: "not found" });
         return;
       }
-      const events = ingestMany(hub, envelope, payload);
+      const enriched = envelope.product === "claude" && envelope.format === "hook"
+        ? await enrichClaudeModel(payload) : payload;
+      const events = ingestMany(hub, envelope, enriched);
       const isOtlp = url.pathname.startsWith("/v1/");
       const isHook = url.pathname.startsWith("/hooks/");
       if (isHook) {

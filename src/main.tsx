@@ -1,3 +1,4 @@
+import { displayText } from "./core/displayText";
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { subagentAssignment, subagentColor } from "./components/subagentPresentation";
@@ -98,18 +99,6 @@ function compactText(value: string, fallback: string) {
   return text || fallback;
 }
 
-function displayText(value: string, fallback: string) {
-  const text = value
-    .replace(/^\s{0,3}#{1,6}\s+/g, "")
-    .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/^\s*[-*+]\s+/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
 
 function commandName(command: string) {
   const executable = command.trim().split(/\s+/)[0] ?? "";
@@ -749,7 +738,7 @@ function App() {
       <div className="inspection-heading"><h2>ACTIVITY & STATUS</h2><button onClick={() => setInspection(false)} aria-label="Close activity and status">×</button></div>
       <div className="completion-sound-controls"><span>Completion sound {completionSound.enabled ? "on" : "off"}</span><button onClick={() => void completionSound.preview()}>Preview chime</button>{completionSound.error && <p role="status">{completionSound.error}</p>}</div>
       <div className="inspection-status"><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p className="quiet">{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
-      {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : (showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status}</span></article>)}</section>)}
+      {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : displayText((showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status, agent.state.label)}</span></article>)}</section>)}
       {!showRecap && workstreams.length === 0 && <p className="quiet">No live activity.</p>}
     </aside>}
 

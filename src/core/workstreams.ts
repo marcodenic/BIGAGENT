@@ -96,7 +96,7 @@ export function applySessionEvent(
   const agentTaskTitle = metaText(event, "agentTaskTitle") ?? previous?.agentTaskTitle;
   const modelProvider = metaText(event, "modelProvider") ?? previous?.modelProvider ?? "unknown";
   const model = metaText(event, "model") ?? previous?.model ?? "unknown model";
-  const effort = metaText(event, "reasoningEffort") ?? previous?.effort ?? "";
+  const effort = metaText(event, "reasoningEffort") ?? metaText(event, "effort") ?? previous?.effort ?? "";
   const explicitRunId = metaText(event, "turnId") ?? metaText(event, "runId");
   const beginsRun = event.kind === "session.start" || event.kind === "turn.start";
   const runId = explicitRunId ?? (beginsRun ? event.id : previous?.runId ?? sessionId);
