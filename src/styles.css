@@ -337,6 +337,13 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   letter-spacing: -.07em;
   white-space: nowrap;
 }
+.workstream time::after {
+  /* Restore the final character's negative tracking inside the clipped row.
+     Keep this independent of responsive rules that reset the timer padding. */
+  content: "";
+  display: inline-block;
+  width: .07em;
+}
 .workstream-visual {
   position: absolute;
   z-index: 2;
@@ -525,7 +532,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   grid-row: 2;
   align-self: start;
   padding-top: clamp(20px, 3vh, 44px);
-  padding-left: clamp(110px, 15vw, 170px);
+  padding-left: clamp(150px, 20vw, 210px);
 }
 .layout-portrait .workstream-visual {
   position: absolute;
@@ -545,11 +552,11 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
 .layout-portrait .matrix-face {
-  left: clamp(38px, 5vw, 64px);
+  left: clamp(64px, 9vw, 100px);
   right: auto;
-  top: 40%;
+  top: 58%;
   transform: translate(-50%, -50%);
-  width: clamp(82px, 14vw, 150px);
+  width: clamp(110px, min(18vw, 36cqh), 190px);
 }
 
 /* A lone agent does not need the portrait layout's narrow face rail. Let the
@@ -852,14 +859,14 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   .matrix-face { display: none; }
   .layout-portrait .workstream-visual { position: absolute; inset: 10px 0 auto auto; bottom: auto; height: auto; align-self: auto; display: block; }
   .layout-portrait .workstream time { font-size: clamp(25px, 7vw, 44px); }
-  .layout-portrait .workstream-activity { padding: clamp(16px, 3vh, 30px) 0 0 clamp(96px, 18vw, 126px); }
+  .layout-portrait .workstream-activity { padding: clamp(16px, 3vh, 30px) 0 0 clamp(120px, 24vw, 156px); }
   .layout-portrait .matrix-face {
     display: block;
-    left: clamp(28px, 7vw, 44px);
+    left: clamp(48px, 11vw, 66px);
     right: auto;
-    top: 32%;
+    top: 56%;
     transform: translate(-50%, -50%);
-    width: clamp(68px, 14vw, 96px);
+    width: clamp(84px, min(20vw, 32cqh), 120px);
   }
   .model-identity small { font-size: 7px; }
   .board-count-1 .state-label,

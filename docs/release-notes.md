@@ -1,9 +1,7 @@
-# BIG AGENT 0.1.12 preview
+# BIG AGENT 0.1.13 preview
 
-- Recover Claude model identity from local session transcripts when startup metadata is missing, including subagents’ own transcripts.
-- Display explicitly reported effort from hook telemetry and matching transcript metadata.
-- Remove Codex realtime inline markers from displayed messages and recaps.
-- Transcript lookup stays local, bounded, and read-only; missing metadata never interrupts activity reporting.
+- Keep the final timer digit fully visible at every responsive size.
+- Move bot animations lower beside the activity on tall multi-task displays and scale them to the available row height.
 
 ## Mac download
 
