@@ -348,6 +348,10 @@ function FittedStateLabel({ label }: { label: string }) {
     const frame = heading.current;
     const text = copy.current;
     if (!frame || !text) return;
+    if (CSS.supports("text-fit", "shrink")) {
+      text.style.removeProperty("--state-label-scale");
+      return;
+    }
     const fit = () => {
       text.style.setProperty("--state-label-scale", "1");
       const available = frame.clientWidth;
@@ -475,8 +479,6 @@ const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, pri
   const visibleAgents = parents.slice(0, agentLimit);
   const extra = parents.length - visibleAgents.length;
   const previewPath = workstream.agents.map(latestImagePath).find(Boolean) ?? "";
-  const agentNames = [...new Set(parents.map((agent) => agent.agentName))];
-  const agentLabel = `${agentNames[0] ?? "AGENT"}${agentNames.length > 1 ? ` +${agentNames.length - 1}` : ""}`;
   const rootAgents = workstream.agents.filter((agent) => !agent.parentSessionId);
   const titledAgents = rootAgents.some((agent) => agent.sessionTitle) ? rootAgents : workstream.agents;
   const sessionTitles = [...new Set(titledAgents.map((agent) => displayText(agent.sessionTitle, "")).filter((title) => title && title.toLowerCase() !== workstream.name.toLowerCase()))];
@@ -486,10 +488,6 @@ const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, pri
       <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
       {sessionTitle && <p className="session-title" title={sessionTitles.join(" + ")}>{sessionTitle}</p>}
       <div className="identity-meta">
-        <div className="workstream-dots" aria-label={`${parents.length} lead agents`}>
-          {parents.slice(0, 6).map((agent) => <i key={agent.id} className={`state-dot status-${agent.state.status}`} />)}
-        </div>
-        <span className="agent-names" title={agentNames.join(" + ")}>{agentLabel}</span>
         <ModelIdentity agents={parents.length ? parents : workstream.agents.slice(0, 1)} />
       </div>
     </div>

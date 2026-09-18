@@ -83,16 +83,6 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   color: #7f8279;
 }
 .identity-meta { display: flex; align-items: center; gap: 12px; min-width: 0; margin-top: clamp(10px, 1.35vh, 19px); }
-.agent-names {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #a6a99f;
-  font: 500 clamp(8px, .7vw, 11px) "Geist Mono Variable", monospace;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
 .model-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .provider-icons { display: flex; align-items: center; flex: none; }
 .provider-icons i {
@@ -119,6 +109,11 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .provider-gemini { color: #8ab4f8 !important; border-color: #3f5f91 !important; }
 .provider-qwen { color: #70a3ff !important; border-color: #3f5e91 !important; }
 .provider-meta { color: #5d8cff !important; border-color: #3a5798 !important; }
+.workstream-identity .provider-icons i {
+  border-color: var(--status-color) !important;
+  box-shadow: 0 0 15px color-mix(in srgb, var(--status-color) 30%, transparent);
+}
+.needs-attention .workstream-identity .provider-icons i { animation: urgent 1.25s ease-in-out infinite; }
 .provider-icons i + i { margin-left: -9px; }
 .model-identity small {
   min-width: 0;
@@ -133,15 +128,11 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .model-unknown .provider-icons i { font-style: normal; color: #777a70; }
 .needs-attention .workstream-identity h2 { color: var(--attention); }
 
-.workstream-dots { display: flex; gap: 10px; flex: none; }
-.state-dot, .agent-pulse, .idle-dot { display: block; border-radius: 50%; background: #777b72; }
-.state-dot { width: 9px; height: 9px; }
-.state-dot.status-thinking, .state-dot.status-searching, .state-dot.status-working, .state-dot.status-command, .state-dot.status-editing, .state-dot.status-testing,
+.agent-pulse, .idle-dot { display: block; border-radius: 50%; background: #777b72; }
 .agent-line.status-thinking .agent-pulse, .agent-line.status-searching .agent-pulse, .agent-line.status-working .agent-pulse, .agent-line.status-command .agent-pulse, .agent-line.status-editing .agent-pulse, .agent-line.status-testing .agent-pulse { background: var(--active); box-shadow: 0 0 14px #c8e94380; }
-.state-dot.status-waiting, .state-dot.status-approval, .agent-line.status-waiting .agent-pulse, .agent-line.status-approval .agent-pulse { background: var(--attention); box-shadow: 0 0 16px #ffb51d8c; }
-.state-dot.status-complete, .agent-line.status-complete .agent-pulse { background: var(--complete); }
-.state-dot.status-error, .agent-line.status-error .agent-pulse { background: var(--error); box-shadow: 0 0 15px #ff625780; }
-.needs-attention .state-dot.status-waiting, .needs-attention .state-dot.status-approval { animation: urgent 1.25s ease-in-out infinite; }
+.agent-line.status-waiting .agent-pulse, .agent-line.status-approval .agent-pulse { background: var(--attention); box-shadow: 0 0 16px #ffb51d8c; }
+.agent-line.status-complete .agent-pulse { background: var(--complete); }
+.agent-line.status-error .agent-pulse { background: var(--error); box-shadow: 0 0 15px #ff625780; }
 
 .workstream-activity { min-width: 0; min-height: 0; overflow: hidden; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
 .workstream-activity > .state-label,
@@ -489,12 +480,9 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .agent-tile-board .project-heading > span { font-size: clamp(9px, .8vw, 13px); }
 .agent-tile-board .session-title { margin-top: 3px; font-size: clamp(7px, .58vw, 9px); }
 .agent-tile-board .identity-meta { margin-top: 5px; gap: 6px; }
-.agent-tile-board .workstream-dots { gap: 5px; }
-.agent-tile-board .state-dot { width: 6px; height: 6px; }
 .agent-tile-board .provider-icons i { width: 20px; height: 20px; }
 .agent-tile-board .provider-icons i + i { margin-left: -6px; }
 .agent-tile-board .model-identity small { display: block; font-size: clamp(7px, .58vw, 9px); }
-.agent-tile-board .agent-names { font-size: clamp(7px, .58vw, 9px); }
 .agent-tile-board .matrix-face { top: 38.5%; width: min(calc(var(--identity-width) * .85), 112px); }
 .agent-tile-board .workstream-visual { position: absolute; top: clamp(11px, 1.4vh, 21px); right: clamp(11px, 1.4vw, 21px); display: block; min-width: 0; }
 .agent-tile-board .workstream time { padding: 0; font-size: clamp(14px, 1.45vw, 25px); }
@@ -1083,3 +1071,109 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .inspection article { font-size: 14px; overflow-wrap: anywhere; }
 .inspection article b, .inspection h3 { font-size: 12px; }
 .inspection :focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+
+/* Fluid row sizing
+   ----------------
+   Each workstream owns a size container, so its type and spacing respond to
+   the space the row actually receives. This keeps a short row on a tall or
+   crowded display from inheriting sizes derived from the whole window. */
+.workstream-board { container: board / size; }
+.workstream {
+  --identity-width: clamp(132px, min(22cqi, 68cqh), 350px);
+  gap: clamp(14px, min(3.2cqi, 10cqh), 58px);
+  padding-block: clamp(7px, 2.3cqh, 34px);
+}
+.board-count-1 .workstream {
+  --identity-width: clamp(170px, min(23cqi, 54cqh), 390px);
+  gap: clamp(20px, min(4cqi, 9cqh), 76px);
+}
+.workstream-identity h2 {
+  font-size: clamp(14px, min(2cqi, 11cqh), 34px);
+}
+.board-count-1 .workstream-identity h2 {
+  font-size: clamp(20px, min(2.4cqi, 8cqh), 42px);
+}
+.project-heading > span {
+  font-size: clamp(10px, min(1.1cqi, 6cqh), 19px);
+}
+.session-title {
+  margin-top: clamp(2px, .6cqh, 7px);
+  font-size: clamp(8px, min(.78cqi, 4.5cqh), 13px);
+}
+.identity-meta {
+  gap: clamp(6px, .75cqi, 12px);
+  margin-top: clamp(5px, 2.2cqh, 19px);
+}
+.model-identity small {
+  font-size: clamp(7px, min(.7cqi, 4cqh), 11px);
+}
+.provider-icons i {
+  width: clamp(20px, min(1.9cqi, 11cqh), 33px);
+  height: clamp(20px, min(1.9cqi, 11cqh), 33px);
+  font-size: clamp(10px, min(1cqi, 6cqh), 18px);
+}
+.matrix-face {
+  width: min(calc(var(--identity-width) * .9), 62cqh, 265px);
+}
+.workstream-visual {
+  top: clamp(7px, 2.3cqh, 34px);
+  bottom: clamp(7px, 2.3cqh, 34px);
+  gap: clamp(7px, 2cqh, 24px);
+}
+.workstream time {
+  font-size: clamp(24px, min(4.2cqi, 22cqh), 72px);
+}
+.state-label {
+  margin-bottom: clamp(4px, 2cqh, 14px);
+  font-size: clamp(2rem, min(10.8cqi, 32cqh), 10.25rem);
+}
+.agent-line {
+  font-size: clamp(10px, min(1.08cqi, 5.5cqh), 19px);
+}
+.agent-focus {
+  min-height: clamp(36px, 17cqh, 70px);
+  gap: clamp(7px, min(.9cqi, 4.5cqh), 16px);
+  padding-block: clamp(3px, 2cqh, 10px);
+  font-size: clamp(17px, min(2.25cqi, 11cqh), 38px);
+}
+.agent-commentary {
+  min-height: clamp(22px, 11cqh, 44px);
+  gap: clamp(7px, min(.9cqi, 4.5cqh), 16px);
+}
+.agent-context {
+  column-gap: clamp(7px, min(.9cqi, 4.5cqh), 16px);
+  padding-bottom: clamp(3px, 2cqh, 10px);
+  font-size: clamp(8px, min(.8cqi, 4cqh), 13px);
+}
+.agent-plan {
+  padding-block: clamp(3px, 2cqh, 12px) clamp(2px, 1cqh, 7px);
+}
+.agent-plan li {
+  font-size: clamp(9px, min(.9cqi, 4.5cqh), 15px);
+}
+.rolling-activity {
+  --activity-row-height: clamp(18px, 9cqh, 36px);
+}
+.agent-step {
+  gap: clamp(7px, min(.9cqi, 4.5cqh), 16px);
+  padding-block: clamp(1px, 1.2cqh, 5px);
+}
+.app:not(.layout-portrait) .state-label {
+  padding-right: clamp(110px, 13cqi, 240px);
+}
+.layout-compact .matrix-face {
+  width: min(calc(var(--identity-width) * .74), 62cqh, 205px);
+}
+.layout-compact.agent-tile-board .matrix-face {
+  width: min(calc(var(--identity-width) * .74), 58cqh, 112px);
+}
+
+/* Chromium 150 can fit a single line by changing its used font size. Older
+   Electron builds keep the measured scaleX fallback in FittedStateLabel. */
+@supports (text-fit: shrink) {
+  .state-label > span {
+    width: 100%;
+    transform: none;
+    text-fit: shrink 58%;
+  }
+}

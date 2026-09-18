@@ -1,7 +1,8 @@
-# BIG AGENT 0.1.13 preview
+# BIG AGENT 0.1.14 preview
 
-- Keep the final timer digit fully visible at every responsive size.
-- Move bot animations lower beside the activity on tall multi-task displays and scale them to the available row height.
+- Fit status text natively with Chromium 150 and scale row typography, spacing, timers, and activity from each workstream's available space.
+- Prevent long status labels, timers, and bot animations from colliding on tall, wide, and compact displays.
+- Simplify each workstream's identity row to the model and effort, with a status-coloured provider ring replacing the repeated agent label and dot.
 
 ## Mac download
 

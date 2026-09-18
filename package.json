@@ -1,7 +1,7 @@
 {
   "name": "big-agent",
   "private": true,
-  "version": "0.1.13",
+  "version": "0.1.14",
   "desktopName": "big-agent",
   "description": "An ambient room-scale display for autonomous agents",
   "author": "BIG AGENT contributors",
@@ -41,7 +41,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "42.1.0",
+    "electron": "43.7.1",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "esbuild": "0.21.5",
