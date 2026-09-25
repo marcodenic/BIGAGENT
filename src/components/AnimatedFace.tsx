@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useMemo, useRef, useState, type ComponentType, 
 import type { AgentPhase, AgentStatus } from "../core/protocol";
 import { OfficialGrokBotRenderer } from "../vendor/grok-bot-0.18/renderer";
 import { useActivityVariant } from "./useActivityVariant";
+import { useFaceTimeline } from "./useFaceTimeline";
 import {
   OFFICIAL_GROK_COLORS,
   animatedStateForStatus,
@@ -36,7 +37,8 @@ function AnimatedFaceComponent({ status, phase, seed, personality, attention, si
   const container = useRef<HTMLSpanElement>(null);
   const [paused, setPaused] = useState(() => document.hidden);
   const baseState = expression ?? animatedStateForStatus(status, attention, phase);
-  const state = useActivityVariant(baseState, personality, paused, expression !== undefined);
+  const requestedState = useActivityVariant(baseState, personality, paused, expression !== undefined);
+  const state = useFaceTimeline(requestedState, attention || status === "waiting" || status === "approval" || status === "error", paused);
   const selectedShape = shape ?? personalityShape(personality);
   const palette = useMemo(() => color ? OFFICIAL_GROK_COLORS[color] : personalityPalette(personality), [color, personality]);
   const style = useMemo(() => ({

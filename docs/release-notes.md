@@ -1,8 +1,8 @@
-# BIG AGENT 0.1.14 preview
+# BIG AGENT 0.1.15 preview
 
-- Fit status text natively with Chromium 150 and scale row typography, spacing, timers, and activity from each workstream's available space.
-- Prevent long status labels, timers, and bot animations from colliding on tall, wide, and compact displays.
-- Simplify each workstream's identity row to the model and effort, with a status-coloured provider ring replacing the repeated agent label and dot.
+- Let short face animations finish a visible cycle before showing the newest agent status.
+- Keep editing visible through a complete pencil stroke, even when faster models move straight back to thinking.
+- Show errors and requests for input immediately.
 
 ## Mac download
 
