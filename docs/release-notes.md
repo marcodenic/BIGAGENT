@@ -1,10 +1,8 @@
-# BIG AGENT 0.1.16 preview
+# BIG AGENT 0.1.17 preview
 
-- Reconcile stopped and completed Codex agents across live events, session files, and reconnects so stale activity does not leave them spinning.
-- Recognise current Codex collaboration events and keep Claude subagent activity attached to the correct parent and child.
-- Preserve elapsed times and event order when restoring session history, and keep active tasks and subagents ahead of completed ones.
-- Keep crowded boards readable with scrolling instead of compressing every completed task onto the screen.
-- Remove excessive spacing above command history and fit portrait activity panels within their rows so commands remain visible.
+- Fix completed or stopped Codex subagents remaining active when the live feed takes over from local session monitoring. Completion records now have distinct IDs so they are not discarded as duplicate activity.
+- Re-check the runtime status of active subscribed Codex threads, recovering missed completion notifications even when the finished thread remains loaded.
+- Ignore stale status responses when a new turn starts during a check, preventing an old response from ending new work.
 
 ## Mac download
 

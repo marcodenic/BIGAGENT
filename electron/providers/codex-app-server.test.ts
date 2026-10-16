@@ -49,6 +49,7 @@ type ProviderHarness = {
   request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
   refreshDesktopState(): Promise<void>;
   reconcileLoadedThreads(): Promise<void>;
+  observe(message: Record<string, unknown>): void;
   disconnect(): void;
 };
 
@@ -103,5 +104,42 @@ it("does not overlap loaded-thread polls", async () => {
   expect(request).toHaveBeenCalledTimes(1);
   resolve({ data: [], nextCursor: null });
   await first;
+  provider.stop();
+});
+
+it("repairs a missed child completion while the thread remains loaded", async () => {
+  const hub = new TelemetryHub();
+  const provider = new CodexAppServerProvider(hub, () => {});
+  const harness = provider as unknown as ProviderHarness;
+  harness.connected = true;
+  harness.subscribed.add("child");
+  harness.threads.set("child", { id: "child", parentThreadId: "root", status: { type: "active", activeFlags: [] } });
+  vi.spyOn(harness, "refreshDesktopState").mockResolvedValue();
+  const request = vi.spyOn(harness, "request").mockImplementation(async method => method === "thread/loaded/list"
+    ? { data: ["child"], nextCursor: null }
+    : { thread: { id: "child", status: { type: "idle" } } });
+  await harness.reconcileLoadedThreads();
+  expect(request).toHaveBeenCalledWith("thread/read", { threadId: "child", includeTurns: false });
+  expect(hub.eventsBySource()["codex-app-server"].at(-1)).toMatchObject({ kind: "turn.end", meta: { sessionId: "child", parentSessionId: "root" } });
+  request.mockClear();
+  await harness.reconcileLoadedThreads();
+  expect(request).not.toHaveBeenCalledWith("thread/read", expect.anything());
+  provider.stop();
+});
+
+it("ignores a stale idle read when a new turn starts during reconciliation", async () => {
+  const provider = new CodexAppServerProvider(new TelemetryHub(), () => {});
+  const harness = provider as unknown as ProviderHarness;
+  harness.connected = true;
+  harness.subscribed.add("child");
+  harness.threads.set("child", { id: "child", status: { type: "active", activeFlags: [] } });
+  vi.spyOn(harness, "refreshDesktopState").mockResolvedValue();
+  vi.spyOn(harness, "request").mockImplementation(async method => {
+    if (method === "thread/loaded/list") return { data: ["child"], nextCursor: null };
+    harness.observe({ method: "turn/started", params: { threadId: "child", turn: { id: "next", status: "inProgress" } } });
+    return { thread: { id: "child", status: { type: "idle" } } };
+  });
+  await harness.reconcileLoadedThreads();
+  expect(harness.threads.get("child")?.status).toMatchObject({ type: "active" });
   provider.stop();
 });

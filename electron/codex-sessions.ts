@@ -691,7 +691,10 @@ function recordEvent(
 
   return {
     version: 1,
-    id: `codex-session-${turn}-${ordinal}`,
+    // Completion can update the last item without appending another one. Give
+    // that boundary its own stable ID so a live-feed takeover cannot cause the
+    // reducer to discard it as an already-seen activity record.
+    id: `codex-session-${turn}-${ordinal}${status === "complete" || status === "stopped" ? `-${status}` : ""}`,
     timestamp: new Date((completedAt !== null && (status === "complete" || status === "stopped") ? completedAt : observedAt) * 1_000).toISOString(),
     kind,
     status,

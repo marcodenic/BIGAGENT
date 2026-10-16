@@ -439,6 +439,10 @@ export class CodexAppServerProvider {
     } else if (method === "thread/status/changed" && threadId) {
       const previous = this.threads.get(threadId) ?? { id: threadId };
       this.threads.set(threadId, { ...previous, status: params.status });
+    } else if ((method === "turn/started" || method === "turn/completed") && threadId) {
+      const previous = this.threads.get(threadId) ?? { id: threadId };
+      this.threads.set(threadId, { ...previous, status: method === "turn/started"
+        ? { type: "active", activeFlags: [] } : { type: "idle" } });
     } else if (/^thread\/(?:closed|deleted|archived)$/.test(method) && threadId) {
       this.threads.delete(threadId);
       this.subscribed.delete(threadId);
@@ -484,7 +488,11 @@ export class CodexAppServerProvider {
       // Keep thread metadata across disconnects so disappeared agents can be
       // retired, but subscribe again on every new connection.
       const known = [...this.threads.keys()];
-      const subscriptions = await Promise.allSettled([...loaded].filter((id) => !this.subscribed.has(id) && !this.subscribing.has(id)).map((id) => this.subscribeThread(id)));
+      const refresh = [...loaded].filter(id => this.subscribed.has(id) && statusType(this.threads.get(id) ?? {}) === "active");
+      const subscriptions = await Promise.allSettled([
+        ...[...loaded].filter((id) => !this.subscribed.has(id) && !this.subscribing.has(id)).map((id) => this.subscribeThread(id)),
+        ...refresh.map(id => this.reconcileThreadStatus(id)),
+      ]);
       for (const id of known) {
         if (loaded.has(id)) continue;
         this.observe({ method: "thread/status/changed", emittedAtMs: Date.now(), params: { threadId: id, status: { type: "notLoaded" } } });
@@ -498,6 +506,19 @@ export class CodexAppServerProvider {
     } finally {
       this.reconciling = false;
     }
+  }
+
+  private async reconcileThreadStatus(threadId: string) {
+    const previous = this.threads.get(threadId);
+    // Loaded does not mean running. Read runtime status without resuming the
+    // agent or fetching its history, repairing dropped completion events.
+    const result = await this.request("thread/read", { threadId, includeTurns: false });
+    // A turn boundary or reconnect during the read makes its result stale.
+    if (!this.connected || !this.subscribed.has(threadId) || this.threads.get(threadId) !== previous) return;
+    const thread = object(result.thread);
+    if (thread.id !== threadId || !thread.status || JSON.stringify(thread.status) === JSON.stringify(previous?.status)) return;
+    this.threads.set(threadId, { ...previous, ...thread });
+    this.observe({ method: "thread/status/changed", emittedAtMs: Date.now(), params: { threadId, status: thread.status } });
   }
 
   private async subscribeThread(threadId: string) {
