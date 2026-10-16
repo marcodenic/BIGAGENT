@@ -101,7 +101,7 @@ function publishLocalSessions(available?: boolean) {
   if (available !== undefined) {
     const latest = new Map(localCodexEvents.map(event => [(event.meta as Record<string, unknown>).threadId, event]));
     codexProvider?.noteLocalFeed(available, [...latest.values()]
-      .filter(event => event.status !== "complete" && event.status !== "error").length);
+      .filter(event => event.status !== "complete" && event.status !== "error" && event.status !== "stopped" && event.status !== "idle").length);
   }
   const sessions = codexFallbackEvents();
   telemetryHub.markSource("codex-desktop-fallback", "codex", "rollout-jsonl-fallback", sessions.length ? "live" : "idle", undefined, sessions.length);

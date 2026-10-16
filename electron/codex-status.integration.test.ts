@@ -37,3 +37,24 @@ it("tracks fallback tests, tool completion, and text-free reasoning through real
   write("event_msg", { type: "item_started", turn_id: "turn", item: { type: "Reasoning", summary: [] } });
   expect(current()).toMatchObject({ status: "thinking" });
 });
+
+it.each(["turn_aborted", "task_interrupted", "turn_cancelled", "task_complete"])("settles a rollout on %s without a turn ID and survives later polling", (terminalType) => {
+  directory = mkdtempSync(join(tmpdir(), "bigagent-terminal-"));
+  vi.stubEnv("CODEX_HOME", directory);
+  const rollout = join(directory, "rollout.jsonl");
+  const db = new DatabaseSync(join(directory, "state_5.sqlite"));
+  db.exec(`CREATE TABLE threads (id TEXT, rollout_path TEXT, updated_at_ms INTEGER, title TEXT, cwd TEXT, model_provider TEXT, model TEXT, reasoning_effort TEXT, agent_nickname TEXT, agent_role TEXT, archived INTEGER);
+    CREATE TABLE thread_spawn_edges (child_thread_id TEXT, parent_thread_id TEXT);`);
+  db.prepare("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("child", rollout, Date.now(), "Interrupt fixture", "/tmp/project", "test", "model", "medium", "Agent", "", 0);
+  db.close();
+  const write = (payload: unknown) => appendFileSync(rollout, JSON.stringify({ type: "event_msg", timestamp: new Date().toISOString(), payload }) + "\n");
+  write({ type: "task_started", turn_id: "turn" });
+  expect(codexDesktopSessions().at(-1)?.status).toBe("thinking");
+  write({ type: terminalType, reason: "interrupted" });
+  const status = terminalType === "task_complete" ? "complete" : "stopped";
+  expect(codexDesktopSessions().at(-1)?.status).toBe(status);
+  expect(codexDesktopSessions().at(-1)?.status).toBe(status);
+  write({ type: "task_started", turn_id: "next" });
+  write({ type: "turn_aborted", turn_id: "turn" });
+  expect(codexDesktopSessions().at(-1)).toMatchObject({ status: "thinking", meta: { turnId: "next" } });
+});

@@ -166,6 +166,7 @@ export class CodexAppServerProvider {
   private readonly threads = new Map<string, Json>();
   private readonly subscribed = new Set<string>();
   private readonly subscribing = new Set<string>();
+  private reconciling = false;
   private pollTimer?: NodeJS.Timeout;
   private reconnectTimer?: NodeJS.Timeout;
   private desktopRunning = false;
@@ -434,7 +435,7 @@ export class CodexAppServerProvider {
     const threadId = string(params.threadId) ?? string(notifiedThread.id);
     if (method === "thread/started" && threadId) {
       this.threads.set(threadId, notifiedThread);
-      if (!this.subscribed.has(threadId) && !this.subscribing.has(threadId)) void this.subscribeThread(threadId);
+      if (!this.subscribed.has(threadId) && !this.subscribing.has(threadId)) void this.subscribeThread(threadId).catch(error => this.handlePollError(error));
     } else if (method === "thread/status/changed" && threadId) {
       const previous = this.threads.get(threadId) ?? { id: threadId };
       this.threads.set(threadId, { ...previous, status: params.status });
@@ -448,22 +449,55 @@ export class CodexAppServerProvider {
       : message;
     this.lastEventAt = new Date().toISOString();
     this.hub.ingest({ source: SOURCE_ID, product: "codex", transport: "app-server-json-rpc", format: "codex-app-server", payload: enriched });
+    // A spawned thread can be announced in the collaboration item before it
+    // appears in the loaded-thread poll. Subscribe using the protocol's ID so
+    // its own status and activity replace the temporary spawn placeholder.
+    const item = object(params.item);
+    const childThreadId = string(item.newThreadId) ?? string(item.new_thread_id);
+    const receiverIds = string(item.type) === "collabAgentToolCall" && Array.isArray(item.receiverThreadIds)
+      ? item.receiverThreadIds.filter((id): id is string => typeof id === "string"
+        && !["completed", "interrupted", "shutdown", "notFound", "errored"].includes(string(object(object(item.agentsStates)[id]).status) ?? ""))
+      : string(item.type) === "collabToolCall" && childThreadId ? [childThreadId] : [];
+    for (const id of receiverIds) {
+      if (this.subscribed.has(id) || this.subscribing.has(id)) continue;
+      void this.subscribeThread(id).catch(() => {
+        // The child may not be resumable yet; loaded-thread polling retries it.
+      });
+    }
     this.publishHealth();
   }
 
   private async reconcileLoadedThreads() {
-    if (!this.connected && this.subscribed.size) return;
-    const result = await this.request("thread/loaded/list", {});
-    const loaded = new Set((Array.isArray(result.data) ? result.data : []).filter((value): value is string => typeof value === "string"));
-    await Promise.all([...loaded].filter((id) => !this.subscribed.has(id) && !this.subscribing.has(id)).map((id) => this.subscribeThread(id)));
-    for (const id of [...this.subscribed]) {
-      if (loaded.has(id)) continue;
-      this.observe({ method: "thread/status/changed", emittedAtMs: Date.now(), params: { threadId: id, status: { type: "notLoaded" } } });
-      this.subscribed.delete(id);
-      this.threads.delete(id);
+    if (!this.connected || this.reconciling) return;
+    this.reconciling = true;
+    try {
+      const loaded = new Set<string>();
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const result = await this.request("thread/loaded/list", cursor ? { cursor } : {});
+        for (const id of Array.isArray(result.data) ? result.data : []) if (typeof id === "string") loaded.add(id);
+        cursor = string(result.nextCursor);
+        if (cursor && cursors.has(cursor)) throw new Error("App Server repeated its loaded-thread cursor");
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
+      // Keep thread metadata across disconnects so disappeared agents can be
+      // retired, but subscribe again on every new connection.
+      const known = [...this.threads.keys()];
+      const subscriptions = await Promise.allSettled([...loaded].filter((id) => !this.subscribed.has(id) && !this.subscribing.has(id)).map((id) => this.subscribeThread(id)));
+      for (const id of known) {
+        if (loaded.has(id)) continue;
+        this.observe({ method: "thread/status/changed", emittedAtMs: Date.now(), params: { threadId: id, status: { type: "notLoaded" } } });
+        this.subscribed.delete(id);
+        this.threads.delete(id);
+      }
+      const failed = subscriptions.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+      await this.refreshDesktopState();
+      this.publishHealth();
+    } finally {
+      this.reconciling = false;
     }
-    await this.refreshDesktopState();
-    this.publishHealth();
   }
 
   private async subscribeThread(threadId: string) {
@@ -551,6 +585,7 @@ export class CodexAppServerProvider {
       request.reject(new Error("App Server connection closed"));
     }
     this.pending.clear();
+    this.subscribed.clear();
     this.connected = false;
   }
 

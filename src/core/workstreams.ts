@@ -99,11 +99,26 @@ export function applySessionEvent(
   const effort = metaText(event, "reasoningEffort") ?? metaText(event, "effort") ?? previous?.effort ?? "";
   const explicitRunId = metaText(event, "turnId") ?? metaText(event, "runId");
   const beginsRun = event.kind === "session.start" || event.kind === "turn.start";
-  const runId = explicitRunId ?? (beginsRun ? event.id : previous?.runId ?? sessionId);
+  const resumesChild = event.meta?.childMayResume === true && event.status && activeStatuses.has(event.status)
+    && previous && (previous.state.status === "complete" || previous.state.status === "stopped");
+  const runId = explicitRunId ?? (beginsRun || resumesChild ? event.id : previous?.runId ?? sessionId);
   const sameRun = previous?.runId === runId;
   const lastMessage = metaText(event, "lastMessage") ?? (sameRun ? previous.lastMessage : "");
   const startedAt = metaTime(event, "startedAtMs");
   const completedAt = metaTime(event, "completedAtMs");
+  const occurredAt = Date.parse(event.timestamp);
+  const previousOccurredAt = Date.parse(previous?.state.recent[0]?.timestamp ?? "");
+  if (previous && !sameRun && ((Number.isFinite(occurredAt) && Number.isFinite(previousOccurredAt) && occurredAt < previousOccurredAt)
+    || (startedAt !== undefined && previous.state.startedAt !== null && startedAt < previous.state.startedAt))) return sessions;
+  // A terminal observation can repair a missed live notification. Source
+  // priority must not make a hook/server's last active event immortal.
+  const endsRun = event.kind === "turn.end" || event.kind === "session.end" || event.kind === "complete";
+  const reconcilesEnd = endsRun && (sameRun || !explicitRunId)
+    && (completedAt === undefined || completedAt >= (previous?.state.startedAt ?? 0));
+  // Delayed item notifications for an explicitly identified finished turn
+  // cannot restart it. A new turn has its own ID or an explicit boundary.
+  if (sameRun && (explicitRunId || event.meta?.childStateObservation === true) && event.status && activeStatuses.has(event.status)
+    && (previous.state.status === "complete" || previous.state.status === "stopped")) return sessions;
   const base: DisplayState = sameRun ? previous.state : {
     ...initialState,
     recent: [],
@@ -116,7 +131,7 @@ export function applySessionEvent(
   // An official live transport wins over a passive database/log fallback for
   // the same provider session. The fallback remains available when no proper
   // feed has been connected.
-  if (previous && previous.runId === runId && sourcePriority(previous.source) > sourcePriority(source)) return sessions;
+  if (previous && previous.runId === runId && sourcePriority(previous.source) > sourcePriority(source) && !reconcilesEnd) return sessions;
   const state = reduceEvent(base, event, now);
   if (startedAt !== undefined) state.startedAt = startedAt;
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
@@ -132,14 +147,26 @@ export function replaceSessionSource(
   events: AgentEvent[],
   now = Date.now(),
 ) {
-  const previous = Object.fromEntries(Object.entries(sessions).filter(([, session]) => session.source === source));
   // Snapshot status is authoritative. Rebuild source sessions in event order
   // so an older, newly discovered record cannot resurrect a terminal agent.
   let next = Object.fromEntries(Object.entries(sessions).filter(([, session]) => session.source !== source));
-  for (const event of events) next = applySessionEvent(next, event, now, source);
+  for (const event of events) {
+    // A snapshot contains historical events, not fresh lifecycle transitions.
+    // Replaying it at wall-clock time fills the board with zero-duration DONEs.
+    const occurredAt = Date.parse(event.timestamp);
+    next = applySessionEvent(next, event, Number.isFinite(occurredAt) ? Math.min(now, occurredAt) : now, source);
+  }
+  return preserveSnapshotHistory(sessions, next, new Set([source]), now);
+}
+
+function preserveSnapshotHistory(sessions: Record<string, AgentSession>, next: Record<string, AgentSession>, sources: Set<string>, now: number) {
+  const previous = Object.fromEntries(Object.entries(sessions).filter(([, session]) => sources.has(session.source)));
   // Preserve older display history without allowing it to mutate rebuilt state.
   for (const [id, session] of Object.entries(next)) {
-    if (session.source !== source || !previous[id] || previous[id].runId !== session.runId) continue;
+    if (!sources.has(session.source) || !previous[id] || previous[id].runId !== session.runId) continue;
+    if (!session.state.recent.some(event => metaTime(event, "startedAtMs") !== undefined)) {
+      session.state.startedAt = previous[id].state.startedAt ?? session.state.startedAt;
+    }
     if ((session.state.status === "complete" || session.state.status === "stopped") && previous[id].state.status === session.state.status) {
       session.state.endedAt = previous[id].state.endedAt;
     }
@@ -161,16 +188,18 @@ export function replaceSessionSnapshot(
   authoritativeSources: string[],
   now = Date.now(),
 ) {
-  const grouped = new Map<string, AgentEvent[]>();
-  for (const event of events) {
-    const source = metaText(event, "source") ?? "protocol";
-    grouped.set(source, [...(grouped.get(source) ?? []), event]);
+  const sources = new Set([...authoritativeSources, ...events.map(event => metaText(event, "source") ?? "protocol")]);
+  let next = Object.fromEntries(Object.entries(sessions).filter(([, session]) => !sources.has(session.source)));
+  const eventTime = (event: AgentEvent) => {
+    const timestamp = Date.parse(event.timestamp);
+    return Math.min(now, Number.isFinite(timestamp) ? timestamp : metaTime(event, "completedAtMs") ?? metaTime(event, "startedAtMs") ?? now);
+  };
+  // Interleave transports by event time. Replaying whole sources in source
+  // order can put an old server start after a persisted child completion.
+  for (const event of [...events].sort((a, b) => eventTime(a) - eventTime(b))) {
+    next = applySessionEvent(next, event, eventTime(event), metaText(event, "source") ?? "protocol");
   }
-  let next = sessions;
-  for (const source of new Set([...authoritativeSources, ...grouped.keys()])) {
-    next = replaceSessionSource(next, source, grouped.get(source) ?? [], now);
-  }
-  return next;
+  return preserveSnapshotHistory(sessions, next, sources, now);
 }
 
 export function groupWorkstreams(sessions: Record<string, AgentSession>, now = Date.now(), completedTtlMs = 20_000) {
@@ -205,7 +234,7 @@ export function groupWorkstreams(sessions: Record<string, AgentSession>, now = D
   const workstreams: Workstream[] = [];
   for (const [id, agents] of grouped) {
     agents.sort((a, b) => (a.state.startedAt ?? a.updatedAt) - (b.state.startedAt ?? b.updatedAt) || a.id.localeCompare(b.id));
-    const lead = agents[0];
+    const lead = agents.find(agent => !agent.parentSessionId) ?? agents[0];
     const activeAgents = agents.filter((agent) => activeStatuses.has(agent.state.status));
     const errors = agents.filter((agent) => agent.state.status === "error");
     // A live sibling keeps the workstream focused on current work. If nothing
@@ -243,7 +272,10 @@ export function activeBoardWorkstreams(workstreams: Workstream[]) {
   const needsBoard = workstreams.some((workstream) => workstream.agents.some((agent) =>
     activeStatuses.has(agent.state.status) || agent.state.status === "error" || agent.state.status === "stopped"
     || (agent.state.status === "complete" && (agent.state.completionScope === "turn" || Boolean(agent.parentSessionId)))));
-  return needsBoard ? workstreams : [];
+  // Keep live/attention rows ahead of completion receipts, preserving order
+  // within each group so a burst of finished agents cannot bury running work.
+  return needsBoard ? [...workstreams.filter(workstream => workstream.attention || workstream.agents.some(agent => activeStatuses.has(agent.state.status))),
+    ...workstreams.filter(workstream => !workstream.attention && !workstream.agents.some(agent => activeStatuses.has(agent.state.status)))] : [];
 }
 
 /** Single lifecycle projection used by the renderer. Keeping these related

@@ -1,8 +1,10 @@
-# BIG AGENT 0.1.15 preview
+# BIG AGENT 0.1.16 preview
 
-- Let short face animations finish a visible cycle before showing the newest agent status.
-- Keep editing visible through a complete pencil stroke, even when faster models move straight back to thinking.
-- Show errors and requests for input immediately.
+- Reconcile stopped and completed Codex agents across live events, session files, and reconnects so stale activity does not leave them spinning.
+- Recognise current Codex collaboration events and keep Claude subagent activity attached to the correct parent and child.
+- Preserve elapsed times and event order when restoring session history, and keep active tasks and subagents ahead of completed ones.
+- Keep crowded boards readable with scrolling instead of compressing every completed task onto the screen.
+- Remove excessive spacing above command history and fit portrait activity panels within their rows so commands remain visible.
 
 ## Mac download
 

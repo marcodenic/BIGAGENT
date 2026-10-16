@@ -20,3 +20,8 @@ describe("Codex desktop and shared server coexistence", () => {
     expect(uncoveredCodexEvents([desktop], [{ meta: { threadId: "task" } }])).toEqual([desktop]);
   });
 });
+
+it("does not suppress persisted stop evidence just because the server saw its start", () => {
+  const stopped = { ...event("child", "turn"), status: "stopped", kind: "turn.end" };
+  expect(uncoveredCodexEvents([stopped], [{ ...event("child", "turn"), status: "thinking" }])).toEqual([stopped]);
+});

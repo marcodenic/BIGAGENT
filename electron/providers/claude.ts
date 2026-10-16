@@ -138,6 +138,7 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
   const rawState = text(entry.state, entry.status)?.toLowerCase();
   if (!sessionId || !rawState) return undefined;
   const cwd = text(entry.cwd) ?? "";
+  const parentSessionId = text(entry.parentSessionId, entry.parent_session_id);
   const waitingFor = entry.waitingFor;
   const waitingDetail = typeof waitingFor === "string"
     ? waitingFor
@@ -167,7 +168,7 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
     label = "SOMETHING BROKE";
     detail = text(entry.error, entry.summary) || "Claude session failed";
   } else if (rawState === "stopped") {
-    status = "complete";
+    status = "stopped";
     kind = "session.end";
     label = "STOPPED";
     detail = "Claude session stopped";
@@ -196,11 +197,13 @@ export function claudeRegistryEvent(entry: Json, previousState?: string): AgentE
       product: "claude",
       transport: "agents-json",
       sessionId,
-      workstreamId: sessionId,
+      parentSessionId,
+      workstreamId: parentSessionId ?? sessionId,
       workstreamName: basename(cwd) || text(entry.name) || "CLAUDE",
       project: cwd,
       sessionTitle: text(entry.sessionTitle, entry.session_title, entry.customTitle, entry.custom_title, entry.title),
       agentName: text(entry.name) || "Claude",
+      agentRole: text(entry.agentType, entry.agent_type, entry.agentRole, entry.agent_role),
       modelProvider: "anthropic",
       model: text(entry.model) || "claude",
       startedAtMs: !previousState && rawState !== "idle" && typeof entry.startedAt === "number" ? entry.startedAt : undefined,

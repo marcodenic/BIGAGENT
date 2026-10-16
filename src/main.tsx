@@ -30,6 +30,7 @@ import "@fontsource-variable/geist-mono";
 import {
   applySessionEvent,
   groupWorkstreams,
+  isActiveStatus,
   projectWorkstreamPresentation,
   replaceSessionSnapshot,
   type AgentSession,
@@ -459,10 +460,12 @@ function AgentTeam({ agents, privacy, family }: { agents: AgentSession[]; privac
   const [expanded, setExpanded] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const selected = agents.find(agent => agent.id === selectedId);
-  const visible = expanded ? agents : agents.slice(0, 3);
+  const ordered = [...agents.filter(agent => isActiveStatus(agent.state.status) || agent.state.attention), ...agents.filter(agent => !isActiveStatus(agent.state.status) && !agent.state.attention)];
+  const visible = expanded ? ordered : ordered.slice(0, 3);
   const finished = agents.filter(agent => agent.state.status === "complete" || agent.state.status === "stopped").length;
+  const active = agents.filter(agent => isActiveStatus(agent.state.status)).length;
   return <section className="agent-team" aria-label="Subagents">
-    <div className="team-heading"><span>TEAM · {agents.length - finished} ACTIVE{finished ? ` · ${finished} FINISHED` : ""}</span>
+    <div className="team-heading"><span>TEAM · {active} ACTIVE{finished ? ` · ${finished} FINISHED` : ""}</span>
       {agents.length > 3 && <button onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "LESS" : `+${agents.length - 3} MORE`}</button>}
     </div>
     <div className="team-members">{visible.map(agent => <button key={agent.id} className={`team-member ${agent.state.attention ? "team-attention" : ""}`} aria-pressed={selectedId === agent.id} onClick={() => setSelectedId(selectedId === agent.id ? "" : agent.id)}>

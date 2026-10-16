@@ -96,6 +96,22 @@ describe("end-to-end lifecycle projection", () => {
     expect(groupWorkstreams(sessions, 24_001)).toEqual([]);
   });
 
+  it("keeps Claude task-list activity on the parent and child hooks on the child", () => {
+    const claude = (payload: Record<string, unknown>) => normalizeTelemetry({
+      source: "claude-hooks", product: "claude", transport: "lifecycle-hooks", format: "hook", payload, receivedAt: 1_000,
+    })[0];
+    let sessions: Record<string, AgentSession> = {};
+    sessions = apply(sessions, claude({ hook_event_name: "UserPromptSubmit", session_id: "root", prompt_id: "prompt" }), 1_000);
+    sessions = apply(sessions, claude({ hook_event_name: "TaskCreated", session_id: "root", task_id: "1", task_subject: "Inspect provider" }), 2_000);
+    expect(sessions.root.state).toMatchObject({ phase: "planning", detail: "Inspect provider" });
+    expect(groupWorkstreams(sessions, 2_000)[0].agents).toHaveLength(1);
+    sessions = apply(sessions, claude({ hook_event_name: "SubagentStart", session_id: "root", agent_id: "child", agent_type: "Explore" }), 3_000);
+    sessions = apply(sessions, claude({ hook_event_name: "PreToolUse", session_id: "root", agent_id: "child", agent_type: "Explore", tool_name: "Edit" }), 4_000);
+    expect(sessions.child).toMatchObject({ parentSessionId: "root", state: { status: "editing" } });
+    expect(sessions.root.state.detail).toBe("Inspect provider");
+    expect(groupWorkstreams(sessions, 4_000)[0].agents.map((agent) => agent.id)).toEqual(["root", "child"]);
+  });
+
   it("handles repeated App Server turns without reviving a closed thread", () => {
     let sessions: Record<string, AgentSession> = {};
     sessions = apply(sessions, normalize("codex-app-server", { method: "thread/started", params: { thread: { id: "root", sessionId: "root" } } }, "codex-app-server"), 1_000);

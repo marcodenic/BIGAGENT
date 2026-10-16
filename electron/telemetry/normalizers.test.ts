@@ -84,7 +84,30 @@ describe("telemetry normalization", () => {
       background_tasks: [{ id: "job-1" }],
     }, "claude-hooks"));
     expect(task).toMatchObject({ kind: "activity", status: "working", detail: "Audit lifecycle" });
-    expect(background).toMatchObject({ kind: "activity", status: "working", detail: "Background work continues" });
+    expect(background).toMatchObject({ kind: "activity", status: "working", phase: "executing", detail: "Background work continues" });
+  });
+
+  it("treats Claude task hooks and task-list tools as planning rather than delegation", () => {
+    const hook = (payload: Record<string, unknown>) => normalizeTelemetry({ ...envelope("hook", payload, "claude-hooks"), product: "claude" })[0];
+    const created = hook({ hook_event_name: "TaskCreated", session_id: "root", task_id: "1", task_subject: "Audit lifecycle" });
+    const completed = hook({ hook_event_name: "TaskCompleted", session_id: "root", task_id: "1", task_subject: "Audit lifecycle" });
+    const tool = hook({ hook_event_name: "PreToolUse", session_id: "root", tool_name: "TaskCreate" });
+    const idle = hook({ hook_event_name: "TeammateIdle", session_id: "root", teammate_name: "reviewer", team_name: "team" });
+    for (const event of [created, completed, tool, idle]) expect(event.phase).not.toBe("delegating");
+    expect(created).toMatchObject({ label: "TASKS", detail: "Audit lifecycle" });
+    expect(completed).toMatchObject({ label: "TASKS", detail: "Audit lifecycle" });
+    expect(tool).toMatchObject({ label: "TASKS" });
+    expect(idle).toMatchObject({ detail: "reviewer is idle" });
+  });
+
+  it("attributes ordinary Claude child hooks to the child agent", () => {
+    const [event] = normalizeTelemetry({ ...envelope("hook", {
+      hook_event_name: "PreToolUse", session_id: "root", agent_id: "child", agent_type: "reviewer",
+      tool_name: "Edit", tool_input: { file_path: "/tmp/file.ts" },
+    }, "claude-hooks"), product: "claude" });
+    expect(event).toMatchObject({ status: "editing", meta: {
+      sessionId: "child", parentSessionId: "root", workstreamId: "root", threadId: "root", agentName: "reviewer",
+    } });
   });
 
   it("tracks subagents separately and only completes the child that stopped", () => {
@@ -310,6 +333,15 @@ describe("telemetry normalization", () => {
     }, "codex-app-server"));
     expect(event.kind).toBe("plan");
     expect(event.plan).toEqual(["Inspect the source", "Render the plan"]);
+  });
+
+  it("discovers a Codex child from a collaboration spawn item", () => {
+    const [parent, child] = normalizeTelemetry(envelope("codex-app-server", {
+      method: "item/started", params: { threadId: "root", turnId: "turn", thread: { id: "root", sessionId: "project" },
+        item: { id: "spawn-1", type: "collabToolCall", tool: "spawnAgent", status: "inProgress", senderThreadId: "root", newThreadId: "child" } },
+    }, "codex-app-server"));
+    expect(parent).toMatchObject({ phase: "delegating", meta: { sessionId: "root", childThreadId: "child" } });
+    expect(child).toMatchObject({ kind: "session.start", status: "thinking", meta: { sessionId: "child", parentSessionId: "root", workstreamId: "project" } });
   });
 
   it("does not promote streamed Codex text fragments into headline events", () => {

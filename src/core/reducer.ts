@@ -25,13 +25,13 @@ export function reduceEvent(state: DisplayState, event: AgentEvent, now = Date.n
     if ((event.status === undefined || event.status === "idle") && completedObservedTurn) status = "complete";
     else if (event.status === undefined) status = "idle";
   }
-  if (event.kind === "session.end") status = "complete";
+  if (event.kind === "session.end") status = event.status === "stopped" ? "stopped" : "complete";
   if (event.kind === "complete") status = "complete";
   if (event.kind === "error" || event.exitCode && event.exitCode !== 0) status = "error";
   if (event.kind === "approval.requested") status = "approval";
   if (event.kind === "input.requested") status = "waiting";
   if (event.kind === "session.start" || event.kind === "turn.start") next.startedAt ??= now;
-  if (event.kind === "session.end" || event.kind === "turn.end") next.endedAt = now;
+  if (event.kind === "session.end" || event.kind === "turn.end") next.endedAt ??= now;
   if (event.kind === "plan" && event.plan) next.plan = event.plan;
   if (event.files?.length) next.files = event.files;
   if (event.command !== undefined) next.command = event.command;

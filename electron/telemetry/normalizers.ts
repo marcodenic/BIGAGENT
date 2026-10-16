@@ -98,11 +98,13 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
   const model = nested(payload, "model");
   const workspaceRoots = array(payload.workspace_roots ?? payload.workspaceRoots);
   const modelParams = array(payload.model_params ?? payload.modelParams).map(object);
-  const sessionId = firstNestedText(payload, ["session_id", "sessionId", "conversation_id", "conversationId", "trajectory_id", "trajectoryId", "thread_id", "threadId", "task_id", "taskId"])
+  const claudeParentId = envelope.format === "hook" && envelope.product === "claude" ? text(payload.session_id, payload.sessionId) : undefined;
+  const claudeAgentId = claudeParentId ? text(payload.agent_id, payload.agentId) : undefined;
+  const sessionId = claudeAgentId ?? firstNestedText(payload, ["session_id", "sessionId", "conversation_id", "conversationId", "trajectory_id", "trajectoryId", "thread_id", "threadId", "task_id", "taskId"])
     ?? text(session.id, thread.id, extra.sessionId);
-  const parentSessionId = firstNestedText(payload, ["parent_session_id", "parentSessionId", "parent_thread_id", "parentThreadId", "parent_id", "parentId", "parentID"]);
+  const parentSessionId = claudeAgentId ? claudeParentId : firstNestedText(payload, ["parent_session_id", "parentSessionId", "parent_thread_id", "parentThreadId", "parent_id", "parentId", "parentID"]);
   const workstreamId = firstNestedText(payload, ["workstream_id", "workstreamId", "project_id", "projectId"])
-    ?? parentSessionId
+    ?? (claudeAgentId ? claudeParentId : parentSessionId)
     ?? text(project.id, extra.workstreamId, sessionId);
   const cwd = firstNestedText(payload, ["cwd", "directory", "workspace", "workspace_path", "workspacePath", "workspace_root", "workspaceRoot"])
     ?? text(workspaceRoots[0]);
@@ -114,14 +116,14 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     direction: envelope.direction,
     sessionId,
     parentSessionId,
-    threadId: text(thread.id, payload.thread_id, payload.threadId),
+    threadId: claudeAgentId ? claudeParentId : text(thread.id, payload.thread_id, payload.threadId),
     turnId: text(payload.turn_id, payload.turnId, payload.execution_id, payload.executionId, payload.prompt_id, payload.promptId, payload.generation_id, payload.generationId, extra.turnId),
     workstreamId,
     workstreamName: text(project.name, payload.project_name, payload.projectName, cwd?.split(/[\\/]/).filter(Boolean).pop()),
     project: text(project.name, payload.project_name, payload.projectName, cwd),
     sessionTitle: text(payload.session_title, payload.sessionTitle, payload.custom_title, payload.customTitle, session.title, thread.title, extra.sessionTitle),
-    agentName: text(agent.name, payload.agent_name, payload.agentName, extra.agentName, envelope.product),
-    agentRole: text(payload.agentRole, payload.agent_role, agent.role, extra.agentRole),
+    agentName: text(agent.name, payload.agent_name, payload.agentName, claudeAgentId ? payload.agent_type ?? payload.agentType : undefined, extra.agentName, claudeAgentId ? undefined : envelope.product),
+    agentRole: text(payload.agentRole, payload.agent_role, agent.role, claudeAgentId ? payload.agent_type ?? payload.agentType : undefined, extra.agentRole),
     agentPath: text(payload.agentPath, payload.agent_path, extra.agentPath),
     agentTaskTitle: text(payload.agentTaskTitle, extra.agentTaskTitle),
     modelProvider: text(model.provider, payload.model_provider, payload.modelProvider, extra.modelProvider, envelope.product),
@@ -167,10 +169,11 @@ function makeEvent(
 
 function toolActivity(toolName: string | undefined, detail?: string) {
   const normalized = key(toolName);
+  if (/^task(create|update|list|get)$/.test(normalized)) return { status: "working" as const, phase: "planning" as const, label: "TASKS", detail: detail || "Updating task list", tool: toolName };
   if (/search|web|browser|fetch|grep|find/.test(normalized)) return { status: "searching" as const, phase: "searching" as const, label: "SEARCHING", detail: detail || "Searching", tool: toolName };
   if (/edit|write|patch|replace|notebook|filechange/.test(normalized)) return { status: "editing" as const, phase: "editing" as const, label: "EDITING", detail: detail || "Updating files", tool: toolName };
   if (/test|vitest|jest|pytest|check|lint/.test(normalized)) return { status: "testing" as const, phase: "testing" as const, label: "RUNNING TESTS", detail: detail || "Running tests", tool: toolName };
-  if (/spawn|task|subagent|delegate/.test(normalized)) return { status: "working" as const, phase: "delegating" as const, label: "DELEGATING", detail: detail || "Starting another agent", tool: toolName };
+  if (/spawn|^task$|subagent|delegate/.test(normalized)) return { status: "working" as const, phase: "delegating" as const, label: "DELEGATING", detail: detail || "Starting another agent", tool: toolName };
   return { status: "command" as const, phase: "executing" as const, label: "RUNNING", detail: detail || (toolName ? `Using ${toolName}` : "Using a tool"), tool: toolName };
 }
 
@@ -204,7 +207,7 @@ function hookEvents(envelope: TelemetryEnvelope) {
   const agentType = text(payload.agent_type, payload.agentType);
   const messageId = text(payload.message_id, payload.messageId);
   const messageIndex = numberValue(payload.index);
-  const hookCanRepeatWithoutId = /sessionstart|sessionend|permissionrequest|precompact|postcompact|stop|subagentstop/.test(eventName);
+  const hookCanRepeatWithoutId = /sessionstart|sessionend|userpromptsubmit|subagentstart|permissionrequest|notification|precompact|postcompact|stop|subagentstop/.test(eventName);
   const identity = text(payload.event_id, payload.eventId, payload.id) ?? [
     rawName,
     text(payload.session_id, payload.sessionId),
@@ -227,7 +230,7 @@ function hookEvents(envelope: TelemetryEnvelope) {
     sessionId: agentId,
     threadId: parentSessionId,
     workstreamId: parentSessionId,
-    agentName: agentType ?? `${envelope.product === "claude" ? "Claude" : "Codex"} subagent`,
+    agentName: agentType ?? (/subagentstart|subagentcreated/.test(eventName) ? `${envelope.product === "claude" ? "Claude" : "Codex"} subagent` : undefined),
     parentSessionId,
     lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage),
   };
@@ -298,8 +301,9 @@ function hookEvents(envelope: TelemetryEnvelope) {
     if (startSource === "compact") return [makeEvent(envelope, payload, "thinking", "activity", { ...common, phase: "retrying", label: "LOADING", detail: "Compacting context" })];
     return [makeEvent(envelope, payload, "idle", "session.start", { ...common, phase: "idle", label: "READY", detail: startSource ? `Session ${startSource}` : "Session available" })];
   }
-  if (/taskcreated|taskstart/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "DELEGATING", detail: text(payload.subject, payload.description) || "Task created" })];
-  if (/taskcompleted|taskcomplete|taskend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: text(payload.subject, payload.description) || "Task completed" })];
+  if (/taskcreated|taskstart/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "planning", label: "TASKS", detail: text(payload.task_subject, payload.taskSubject, payload.subject, payload.task_description, payload.taskDescription, payload.description) || "Task created" })];
+  if (/taskcompleted|taskcomplete|taskend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "planning", label: "TASKS", detail: text(payload.task_subject, payload.taskSubject, payload.subject, payload.task_description, payload.taskDescription, payload.description) || "Task completed" })];
+  if (/teammateidle/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "WORKING", detail: text(payload.teammate_name, payload.teammateName) ? `${text(payload.teammate_name, payload.teammateName)} is idle` : "Teammate is idle" })];
   if (/turnstart|beforeagent|preuserprompt|beforesubmitprompt/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "Agent started" })];
   if (/sessionend/.test(eventName)) return [makeEvent(envelope, payload, "complete", "session.end", { ...common, phase: "completing", detail: "Agent session completed", meta: { rawEventName: rawName, lastMessage: text(payload.last_assistant_message, payload.lastAssistantMessage) } })];
   if (/notification/.test(eventName) && key(payload.notification_type ?? payload.notificationType) === "idleprompt") {
@@ -307,8 +311,10 @@ function hookEvents(envelope: TelemetryEnvelope) {
   }
   if (/turnend|stop$|stopcancelled/.test(eventName)) {
     const backgroundWork = [...array(payload.background_tasks), ...array(payload.backgroundTasks), ...array(payload.session_crons), ...array(payload.sessionCrons)];
-    if (backgroundWork.length) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "delegating", label: "WORKING", detail: "Background work continues" })];
-    if (payload.stop_hook_active === true || payload.stopHookActive === true) {
+    if (backgroundWork.length) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "executing", label: "WORKING", detail: "Background work continues" })];
+    // Claude's flag describes an earlier hook continuation, not the outcome
+    // of this Stop. Treat this boundary as ended until new activity arrives.
+    if (envelope.product !== "claude" && (payload.stop_hook_active === true || payload.stopHookActive === true)) {
       return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "responding", label: "WORKING", detail: narrative || "Agent may be continuing after a stop hook" })];
     }
     const ended = makeEvent(envelope, payload, "idle", "turn.end", {
@@ -650,6 +656,66 @@ function codexEvents(envelope: TelemetryEnvelope) {
     if (finished) return [makeEvent(envelope, basePayload, "working", "command.end", { ...common, phase: "receiving", command, detail: "Command finished" })];
     const activity = { ...commandActivity(command ?? ""), detail: command || "Running command" };
     return [makeEvent(envelope, basePayload, activity.status, "command.start", { ...common, ...activity, command })];
+  }
+  if (itemType === "collabagenttoolcall") {
+    const toolName = text(item.tool) ?? "collaboration";
+    const spawning = key(toolName) === "spawnagent";
+    const finished = /completed/.test(eventType) || item.status === "completed" || item.status === "failed";
+    const states = object(item.agentsStates);
+    const receivers = new Set([...array(item.receiverThreadIds).filter((id): id is string => typeof id === "string"), ...Object.keys(states)]);
+    const events = [makeEvent(envelope, basePayload, "working", finished ? "command.end" : "command.start", {
+      ...common, tool: toolName,
+      phase: finished ? "receiving" : spawning ? "delegating" : "executing",
+      label: finished ? "RECEIVING" : spawning ? "DELEGATING" : "WORKING",
+      detail: `${toolName} ${finished ? "finished" : "in progress"}`,
+    })];
+    for (const childId of receivers) {
+      const child = object(states[childId]);
+      const state = key(child.status);
+      const stopped = ["interrupted", "shutdown", "notfound"].includes(state);
+      const complete = state === "completed";
+      const failed = state === "errored";
+      if (!state && (!spawning || item.status === "failed")) continue;
+      const status = stopped ? "stopped" : complete ? "complete" : failed ? "error" : "thinking";
+      const parent = spawning ? text(item.senderThreadId, threadId) : undefined;
+      const meta = { rawEventName: rawType, sessionId: childId, threadId: childId, turnId: undefined,
+        parentSessionId: parent, workstreamId: spawning ? text(thread.sessionId, parent) : undefined,
+        agentName: spawning ? "Codex subagent" : undefined, modelProvider: undefined,
+        childStateObservation: true, childMayResume: ["resumeagent", "sendinput"].includes(key(toolName)),
+        model: spawning ? text(item.model) : undefined, reasoningEffort: spawning ? text(item.reasoningEffort) : undefined,
+        lastMessage: complete ? text(child.message) : undefined };
+      events.push(makeEvent(envelope, { timestamp: basePayload.timestamp }, status,
+        // Parent observations have no child turn ID. Keep an already observed
+        // child turn intact when the spawn result arrives after its own start.
+        stopped || complete ? "turn.end" : failed ? "error" : "activity", {
+          identity: `${common.identity}|child|${childId}|${state}`, meta,
+          phase: stopped ? "idle" : complete ? "completing" : failed ? "failed" : "planning",
+          label: stopped ? "STOPPED" : complete ? "DONE" : failed ? "SOMETHING BROKE" : "WORKING",
+          detail: text(child.message) ?? `Subagent ${state || "started"}`,
+        }));
+    }
+    return events;
+  }
+  if (itemType === "collabtoolcall") {
+    const toolName = text(item.tool, item.name);
+    const childThreadId = text(item.newThreadId, item.new_thread_id);
+    const finished = /completed|itemcompleted/.test(eventType);
+    const spawning = key(toolName) === "spawnagent";
+    const parentEvent = makeEvent(envelope, basePayload, finished ? "working" : spawning ? "working" : "command", finished ? "command.end" : "command.start", {
+      ...common,
+      phase: finished ? "receiving" : spawning ? "delegating" : "executing",
+      label: finished ? "RECEIVING" : spawning ? "DELEGATING" : "RUNNING",
+      detail: finished ? `${toolName ?? "Collaboration tool"} finished` : spawning ? "Starting another agent" : `Using ${toolName ?? "collaboration tool"}`,
+      tool: toolName,
+      meta: { rawEventName: rawType, childThreadId },
+    });
+    if (!spawning || !childThreadId || finished) return [parentEvent];
+    const childEvent = makeEvent(envelope, { ...basePayload, sessionId: childThreadId, threadId: childThreadId, parentSessionId: text(item.senderThreadId) ?? threadId, workstreamId: text(thread.sessionId, basePayload.workstreamId), turnId: undefined }, "thinking", "session.start", {
+      identity: `${common.identity}|child|${childThreadId}`,
+      phase: "starting", label: "STARTING", detail: "Subagent started",
+      meta: { rawEventName: rawType, sessionId: childThreadId, threadId: childThreadId, parentSessionId: text(item.senderThreadId) ?? threadId, workstreamId: text(thread.sessionId, basePayload.workstreamId), agentName: "Codex subagent" },
+    });
+    return [parentEvent, childEvent];
   }
   if (/toolcall|mcptool|dynamictool/.test(eventType) || /toolcall/.test(itemType)) {
     const toolName = text(item.tool, item.name, params.tool);

@@ -134,7 +134,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .agent-line.status-complete .agent-pulse { background: var(--complete); }
 .agent-line.status-error .agent-pulse { background: var(--error); box-shadow: 0 0 15px #ff625780; }
 
-.workstream-activity { min-width: 0; min-height: 0; overflow: hidden; align-self: stretch; display: flex; flex-direction: column; justify-content: center; container-type: inline-size; }
+.workstream-activity { min-width: 0; min-height: 0; overflow: hidden; align-self: stretch; display: flex; flex-direction: column; justify-content: safe center; container-type: inline-size; }
 .workstream-activity > .state-label,
 .workstream-activity > ol,
 .workstream-activity > .extra-agents { flex-shrink: 0; }
@@ -223,7 +223,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .agent-target { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #696c64; }
 .agent-focus {
   min-width: 0;
-  min-height: clamp(46px, 5.5vh, 70px);
+  min-height: 0;
   display: grid;
   grid-template-columns: 10px 36px minmax(0, 1fr);
   align-items: start;
@@ -301,7 +301,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 }
 .app:not(.layout-compact) .workstream-activity[data-fit="roomy"] .agent-focus + .rolling-activity,
 .app:not(.layout-compact) .workstream-activity[data-fit="compact"] .agent-focus + .rolling-activity {
-  margin-top: clamp(10px, 1.5vh, 20px);
+  margin-top: clamp(4px, .5cqh, 8px);
 }
 .telemetry-step { opacity: .88; }
 .telemetry-depth-1 { opacity: .68; }
@@ -381,7 +381,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .board-count-1 .workstream-identity h2 { font-size: clamp(24px, 2.4vw, 42px); }
 .board-count-1 .matrix-face { top: 59%; width: min(calc(var(--identity-width) * .94), 315px); }
 .board-count-1 .agent-line { font-size: clamp(15px, 1.48vw, 25px); }
-.board-count-1 .agent-focus { min-height: clamp(58px, 7vh, 88px); font-size: clamp(28px, 3.1cqw, 54px); }
+.board-count-1 .agent-focus { font-size: clamp(28px, 3.1cqw, 54px); }
 /* Only a lone agent gets the larger narrative treatment. */
 .board-count-1 .single-agent .agent-focus { font-size: clamp(36px, min(4.5cqw, 9cqh), 78px); line-height: 1.1; }
 .board-count-1 .single-agent .agent-focus-copy { -webkit-line-clamp: 3; }
@@ -389,7 +389,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .board-count-1 .single-agent .workstream-activity[data-fit="roomy"] .rolling-activity { --activity-row-height: clamp(30px, 3.5vh, 46px); }
 .board-count-1 .agent-context { padding-bottom: clamp(10px, 1.1vh, 16px); font-size: clamp(18px, 1.8cqi, 30px); }
 .board-count-2 .agent-line { font-size: clamp(14px, 1.22vw, 21px); }
-.board-count-2 .agent-focus { min-height: clamp(52px, 5.8vh, 74px); font-size: clamp(24px, 2.5cqw, 40px); }
+.board-count-2 .agent-focus { font-size: clamp(24px, 2.5cqw, 40px); }
 .board-count-2 .agent-context { padding-bottom: clamp(8px, .9vh, 13px); font-size: clamp(17px, 1.5cqi, 26px); }
 .board-count-2 .state-label { font-size: clamp(2.4rem, min(9cqi, 12vmin), 7rem); }
 .board-count-1 .agent-focus-copy, .board-count-2 .agent-focus-copy,
@@ -518,8 +518,8 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .layout-portrait .workstream-activity {
   grid-column: 1;
   grid-row: 2;
-  align-self: start;
-  padding-top: clamp(20px, 3vh, 44px);
+  align-self: stretch;
+  padding-top: clamp(8px, 1vh, 16px);
   padding-left: clamp(150px, 20vw, 210px);
 }
 .layout-portrait .workstream-visual {
@@ -535,7 +535,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .layout-portrait .state-label { font-size: clamp(2.2rem, min(10cqi, 10vmin), 5.75rem); }
 .layout-portrait .workstream-identity h2 { font-size: clamp(20px, 3.2vw, 34px); }
 .layout-portrait .agent-line { font-size: clamp(11px, 1.65vw, 17px); }
-.layout-portrait .agent-focus { min-height: clamp(48px, 4.8vh, 68px); font-size: clamp(20px, 3.3cqw, 34px); }
+.layout-portrait .agent-focus { font-size: clamp(20px, 3.3cqw, 34px); }
 .layout-portrait.board-count-1 :where(.single-agent) .agent-focus { font-size: clamp(30px, min(5.2cqw, 6cqh), 62px); }
 .layout-portrait .agent-target { display: none; }
 .layout-portrait .agent-preview { --preview-max-width: clamp(140px, 20vw, 220px); }
@@ -847,7 +847,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   .matrix-face { display: none; }
   .layout-portrait .workstream-visual { position: absolute; inset: 10px 0 auto auto; bottom: auto; height: auto; align-self: auto; display: block; }
   .layout-portrait .workstream time { font-size: clamp(25px, 7vw, 44px); }
-  .layout-portrait .workstream-activity { padding: clamp(16px, 3vh, 30px) 0 0 clamp(120px, 24vw, 156px); }
+  .layout-portrait .workstream-activity { padding: clamp(8px, 1vh, 16px) 0 0 clamp(120px, 24vw, 156px); }
   .layout-portrait .matrix-face {
     display: block;
     left: clamp(48px, 11vw, 66px);
@@ -967,7 +967,22 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
 .has-team > .matrix-face { width: min(calc(var(--identity-width) * .74), 48cqh, 230px); top: 68%; }
 .workstream-identity .identity-meta { flex-wrap: wrap; row-gap: 6px; }
 .workstream-identity .model-identity small { max-width: none; white-space: normal; }
-.agent-tile-board .workstream-board { overflow-y: auto; grid-auto-rows: minmax(290px, 1fr); }
+/* Explicit auto-fit rows with a zero minimum squeezed large boards into
+   unreadable strips. Use the same readable, scrollable rows at every count. */
+.app.agent-tile-board .workstream-board,
+.app.layout-portrait.agent-tile-board .workstream-board { overflow-y: auto; grid-template-rows: none; grid-auto-rows: minmax(290px, 1fr); }
+.app.agent-tile-board .has-team { grid-row: span 2; }
+.app.agent-tile-board .has-team .workstream-activity { justify-content: flex-start; align-self: stretch; padding-top: 36px; overflow-y: auto; }
+.app.agent-tile-board .has-team .workstream-activity > * { flex-shrink: 0; }
+.app.agent-tile-board .has-team .state-label { padding-right: 0; }
+@media (max-width: 1100px) {
+  .app.agent-tile-board .workstream-board,
+  .app.layout-portrait.agent-tile-board .workstream-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .app.agent-tile-board .workstream-board,
+  .app.layout-portrait.agent-tile-board .workstream-board { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 700px) {
   .workstream-board:has(.has-team) { overflow-y: auto; grid-auto-rows: minmax(380px, auto); }
   .app .has-team .workstream-activity { padding: 0; align-self: stretch; }
@@ -987,16 +1002,14 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   width: min(calc(var(--identity-width) * .9), 265px);
 }
 
-/* A lone task uses a generous composition, rather than a small fixed stack
-   floating in the centre of a room-size display. Dense boards retain their
-   existing content-fitting rules. */
+/* Keep a lone task's enlarged heading and commands together as one stack. */
 @media (min-width: 1000px) and (min-height: 700px) {
   .board-count-1:not(.layout-portrait) .workstream-activity {
     align-self: center;
     height: 80%;
     min-height: 0;
-    justify-content: space-evenly;
-    gap: clamp(16px, 2cqh, 44px);
+    justify-content: safe center;
+    gap: clamp(8px, 1cqh, 16px);
     overflow-y: auto;
   }
   .board-count-1:not(.layout-portrait) .workstream-activity > * { flex-shrink: 0; }
@@ -1131,7 +1144,7 @@ button, select { color: inherit; background: none; border: 0; font: inherit; let
   font-size: clamp(10px, min(1.08cqi, 5.5cqh), 19px);
 }
 .agent-focus {
-  min-height: clamp(36px, 17cqh, 70px);
+  min-height: 0;
   gap: clamp(7px, min(.9cqi, 4.5cqh), 16px);
   padding-block: clamp(3px, 2cqh, 10px);
   font-size: clamp(17px, min(2.25cqi, 11cqh), 38px);

@@ -226,18 +226,19 @@ function updateLiveRollout(path: string) {
       state.items = [];
       continue;
     }
-    if (eventType === "task_complete" && turnId && turnId === state.turnId) {
+    if ((eventType === "task_complete" || eventType === "task_completed") && state.turnId && (!turnId || turnId === state.turnId)) {
       state.status = "completed";
       state.completedAt = timestampSeconds(payload.completed_at, timestamp);
       continue;
     }
-    if (/task_(?:aborted|interrupted)|turn_(?:aborted|interrupted)/.test(eventType) && turnId === state.turnId) {
+    if (/^(?:task|turn)_(?:aborted|interrupted|cancelled)$/.test(eventType) && state.turnId && (!turnId || turnId === state.turnId)) {
       state.status = "interrupted";
       state.completedAt = timestamp;
       continue;
     }
     if (!["item_started", "item_completed"].includes(eventType) || !turnId) continue;
     if (turnId !== state.turnId) {
+      if (timestamp < state.startedAt || (state.completedAt !== null && timestamp <= state.completedAt)) continue;
       state.turnId = turnId;
       state.status = "inProgress";
       state.startedAt = timestamp;
@@ -559,6 +560,7 @@ function recordEvent(
   completedAt: number | null,
   fallbackDetail?: string,
   lastMessage?: string,
+  observedAt = startedAt,
 ) {
   const item = parseJson(itemJson);
   let status = "thinking";
@@ -690,7 +692,7 @@ function recordEvent(
   return {
     version: 1,
     id: `codex-session-${turn}-${ordinal}`,
-    timestamp: "",
+    timestamp: new Date((completedAt !== null && (status === "complete" || status === "stopped") ? completedAt : observedAt) * 1_000).toISOString(),
     kind,
     status,
     phase,
@@ -786,6 +788,7 @@ export function codexDesktopSessions() {
           lifecycle.completedAt,
           fallbackDetail,
           lastMessage,
+          record.timestamp,
         )) : [recordEvent(
           thread.id,
           live.turnId,
