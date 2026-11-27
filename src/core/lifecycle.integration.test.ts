@@ -1,3 +1,4 @@
+import { currentMessage } from "./currentMessage";
 import { claudeRegistryEvent } from "../../electron/providers/claude";
 import { elapsedMs } from "./reducer";
 import { describe, expect, it } from "vitest";
@@ -14,6 +15,40 @@ function apply(sessions: Record<string, AgentSession>, event: AgentEvent, now: n
 }
 
 describe("end-to-end lifecycle projection", () => {
+  it.each([undefined, "idle"])("keeps a live hook message when the registry catches up from %s", previousState => {
+    let now = Date.now();
+    const hook = (payload: Record<string, unknown>) => normalizeTelemetry({
+      source: "claude-hooks", product: "claude", transport: "http", format: "hook", receivedAt: now++,
+      payload: { session_id: "claude-1", ...payload },
+    })[0];
+    const start = hook({ hook_event_name: "UserPromptSubmit" });
+    let sessions = applySessionEvent({}, start, now, "claude-hooks");
+    const message = hook({ hook_event_name: "MessageDisplay", message_id: "message-1", index: 0, delta: "Checking the capacity limits." });
+    sessions = applySessionEvent(sessions, message, now, "claude-hooks");
+    const runId = sessions["claude-1"].runId;
+    const startedAt = sessions["claude-1"].state.startedAt;
+    const registry = claudeRegistryEvent({ sessionId: "claude-1", state: "working" }, previousState)!;
+    registry.timestamp = new Date(now++).toISOString();
+    sessions = applySessionEvent(sessions, registry, now, "claude-agents");
+    sessions = applySessionEvent(sessions, hook({ hook_event_name: "PostToolUse", tool_name: "Read", tool_use_id: "tool-1" }), now, "claude-hooks");
+    expect(currentMessage(sessions["claude-1"], false)).toBe("Checking the capacity limits.");
+    expect(sessions["claude-1"].runId).toBe(runId);
+    expect(sessions["claude-1"].state.startedAt).toBe(startedAt);
+    sessions = applySessionEvent(sessions, hook({ hook_event_name: "UserPromptSubmit" }), now, "claude-hooks");
+    expect(currentMessage(sessions["claude-1"], false)).toBe("");
+  });
+
+  it("still starts and resumes sessions observed only through the registry", () => {
+    let sessions = applySessionEvent({}, claudeRegistryEvent({ sessionId: "registry", state: "working" })!, Date.now(), "claude-agents");
+    const firstRun = sessions.registry.runId;
+    sessions = applySessionEvent(sessions, claudeRegistryEvent({ sessionId: "registry", state: "done", summary: "Finished." }, "working")!, Date.now(), "claude-agents");
+    expect(currentMessage(sessions.registry, false)).toBe("Finished.");
+    sessions = applySessionEvent(sessions, claudeRegistryEvent({ sessionId: "registry", state: "working" }, "done")!, Date.now(), "claude-agents");
+    expect(sessions.registry.runId).not.toBe(firstRun);
+    expect(sessions.registry.state.status).toBe("thinking");
+    expect(currentMessage(sessions.registry, false)).toBe("");
+  });
+
   it.each(["state", "status"])("keeps an initially idle registry session off the board (%s)", (field) => {
     const event = claudeRegistryEvent({ sessionId: "session-1", [field]: "idle", startedAt: 1 })!;
     expect(event).toMatchObject({ status: "idle", kind: "turn.end", phase: "idle", label: "READY" });

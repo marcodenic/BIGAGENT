@@ -88,6 +88,11 @@ export function applySessionEvent(
 ) {
   const sessionId = metaText(event, "sessionId") ?? `${source}:ambient`;
   const previous = sessions[sessionId];
+  // Claude's registry can discover a run after its live hooks already started
+  // it. Its synthetic start is an observation, not another user request.
+  // Apply source precedence before that start can invent a new run ID.
+  if (previous && event.meta?.registryState === "working" && activeStatuses.has(previous.state.status)
+    && sourcePriority(previous.source) > sourcePriority(source)) return sessions;
   const parentSessionId = metaText(event, "parentSessionId") ?? previous?.parentSessionId ?? "";
   const workstreamId = metaText(event, "workstreamId") ?? metaText(event, "threadId") ?? metaText(event, "project") ?? previous?.workstreamId ?? sessionId;
   const workstreamName = metaText(event, "workstreamName") ?? metaText(event, "project") ?? metaText(event, "sessionName") ?? previous?.workstreamName ?? "AMBIENT TASK";

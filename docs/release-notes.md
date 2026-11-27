@@ -1,7 +1,7 @@
-# BIG AGENT 0.1.19 preview
+# BIG AGENT 0.1.20 preview
 
-- Fix the left sidebar shifting when “Planning the next step” appears or disappears. Its space remains reserved, including when the text wraps in narrow layouts, so the timer, character area, and status stay in place.
-- Hide the inactive planning text visually and from screen readers.
+- Fix Claude messages flashing and disappearing when a delayed agent registry update arrives after live activity. Background status checks now preserve the current message and timer.
+- Keep genuine new requests and sessions observed only through the registry working as before, with regression tests for both paths.
 
 ## Mac download
 
