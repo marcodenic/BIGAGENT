@@ -1,4 +1,5 @@
 import type { AgentEvent, AgentPhase, AgentStatus } from "./protocol";
+import { narrativeMessage, usefulMessage } from "./currentMessage";
 import { initialState, reduceEvent, type DisplayState } from "./reducer";
 
 export interface AgentSession {
@@ -17,6 +18,7 @@ export interface AgentSession {
   model: string;
   effort: string;
   lastMessage: string;
+  latestNarrative?: string;
   state: DisplayState;
   updatedAt: number;
 }
@@ -133,11 +135,14 @@ export function applySessionEvent(
   // feed has been connected.
   if (previous && previous.runId === runId && sourcePriority(previous.source) > sourcePriority(source) && !reconcilesEnd) return sessions;
   const state = reduceEvent(base, event, now);
+  const latestNarrative = sameRun && state === base ? previous.latestNarrative : narrativeMessage(event)
+    || usefulMessage(metaText(event, "lastMessage") ?? "")
+    || (sameRun ? previous.latestNarrative : "") || "";
   if (startedAt !== undefined) state.startedAt = startedAt;
   if (completedAt !== undefined && !activeStatuses.has(state.status)) state.endedAt = completedAt;
   return {
     ...sessions,
-    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, sessionTitle, agentName, agentRole, agentPath, agentTaskTitle, modelProvider, model, effort, lastMessage, state, updatedAt: now },
+    [sessionId]: { id: sessionId, runId, source, parentSessionId, workstreamId, workstreamName, sessionTitle, agentName, agentRole, agentPath, agentTaskTitle, modelProvider, model, effort, lastMessage, latestNarrative, state, updatedAt: now },
   };
 }
 
@@ -164,6 +169,7 @@ function preserveSnapshotHistory(sessions: Record<string, AgentSession>, next: R
   // Preserve older display history without allowing it to mutate rebuilt state.
   for (const [id, session] of Object.entries(next)) {
     if (!sources.has(session.source) || !previous[id] || previous[id].runId !== session.runId) continue;
+    session.latestNarrative ||= previous[id].latestNarrative;
     if (!session.state.recent.some(event => metaTime(event, "startedAtMs") !== undefined)) {
       session.state.startedAt = previous[id].state.startedAt ?? session.state.startedAt;
     }

@@ -1,0 +1,136 @@
+/* The message owns the right column; identity, time and animation share the left. */
+.app .workstream.message-first {
+  --identity-width: clamp(130px, 24%, 520px);
+  grid-template-columns: var(--identity-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+  column-gap: clamp(16px, 2.5vw, 64px);
+  row-gap: clamp(8px, 1.4vh, 20px);
+  padding-block: clamp(10px, 1.5vh, 24px);
+}
+.app .message-first .agent-sidebar {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.agent-sidebar .project-heading { position: relative; z-index: 2; }
+.agent-sidebar h2 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 clamp(18px, min(2.4cqw, 10cqh), 46px)/1.1 "Geist Mono Variable", monospace;
+  letter-spacing: -.055em;
+  text-transform: uppercase;
+}
+.app .message-first .agent-sidebar time {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  margin-top: clamp(4px, 1.3cqh, 12px);
+  padding: 0;
+  font: 400 clamp(14px, min(1.7cqw, 6cqh), 32px)/1.1 "Geist Mono Variable", monospace;
+  letter-spacing: -.05em;
+  color: #b5baaa;
+}
+.agent-stage { position: relative; flex: 1; min-height: 0; isolation: isolate; }
+.app .message-first .agent-stage > .matrix-face {
+  display: block;
+  left: 50%;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  width: min(118%, 76cqh);
+  height: auto;
+  max-height: none;
+  transform: translate(-50%, -50%);
+  opacity: .95;
+}
+.sidebar-status { position: relative; z-index: 2; flex: none; text-align: center; color: var(--status-color); padding-top: 4px; }
+.sidebar-status strong { display: block; font: 500 clamp(11px, min(1.1cqw, 4.8cqh), 20px)/1.2 "Geist Mono Variable", monospace; overflow-wrap: anywhere; letter-spacing: .04em; }
+.sidebar-status span { display: block; margin-top: 3px; color: #94998b; font: 400 clamp(10px, min(.85cqw, 3.8cqh), 15px)/1.2 "Geist Mono Variable", monospace; }
+.app .message-first .agent-sidebar .agent-preview {
+  --preview-max-width: 100%;
+  --preview-height: min(24cqh, 150px);
+  flex-shrink: 0;
+  align-self: center;
+  margin-top: 8px;
+}
+.message-heading {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: clamp(7px, .8cqw, 16px);
+  min-width: 0;
+  color: #929789;
+  font: 400 clamp(10px, min(.9cqw, 4cqh), 17px)/1.3 "Geist Mono Variable", monospace;
+}
+.message-task { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b7bcad; }
+.message-agent-name { flex-shrink: 0; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; }
+.message-heading > * + *::before { content: none; }
+.message-heading .model-identity { flex-shrink: 0; max-width: 48%; gap: 6px; }
+.message-heading .model-identity small { font-size: inherit; color: inherit; letter-spacing: 0; }
+.message-heading .provider-icons i { width: clamp(17px, 1.7cqw, 28px); height: clamp(17px, 1.7cqw, 28px); box-shadow: none; }
+.message-panel {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
+.message-panel > ol { flex: 1; min-height: 0; display: grid; grid-auto-rows: minmax(0, 1fr); gap: 12px; list-style: none; padding: 0; margin: 0; }
+.agent-message { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: clamp(8px, 2cqh, 20px); }
+.message-focus { min-height: 0; overflow: hidden; font: 400 clamp(24px, min(5cqw, 14cqh), 100px)/1.17 "Geist Variable", system-ui, sans-serif; letter-spacing: -.035em; }
+.message-copy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--message-lines, 6); overflow: hidden; overflow-wrap: anywhere; }
+.message-focus.awaiting-update { font-size: clamp(16px, min(2cqw, 7cqh), 28px); color: #929789; }
+.app .message-first .rolling-activity { --activity-row-height: clamp(20px, 7cqh, 34px); border-top: 1px solid #292e24; padding-top: 5px; overflow: hidden; }
+.app .message-first .agent-step { display: flex; gap: 8px; font: 400 clamp(10px, min(1.3cqw, 4.8cqh), 20px)/1.25 "Geist Mono Variable", monospace; padding: 0; }
+.app .message-first .agent-step .history-mark,
+.app .message-first .agent-step .agent-number,
+.app .message-first .agent-step .agent-target { display: none; }
+.app .message-first .agent-step strong { flex-shrink: 0; color: #a8b46e; font-size: .9em; }
+.app .message-first .agent-tool { max-width: 23%; flex-shrink: 0; color: #a2a797; }
+.app .message-first .agent-detail { flex: 1; color: #929789; }
+.app .message-first .agent-team { flex: 0 1 auto; max-height: 48%; min-height: 0; overflow-y: auto; margin-top: 12px; }
+.app .message-first .extra-agents { flex: none; margin: 4px 0; }
+.inspection-history { font: 12px/1.5 "Geist Mono Variable", monospace; color: #a6aa9e; padding-left: 18px; }
+.app:has(.message-first) { padding-block: clamp(8px, 1vh, 16px); }
+.app:has(.message-first) .board-controls { min-height: 38px; }
+.app:has(.message-first) .board-controls > button { min-height: 38px; padding-block: 7px; }
+
+/* Dense boards retain the same hierarchy, with enough row height to read. */
+.app.agent-tile-board .workstream.message-first { --identity-width: 25%; column-gap: 12px; padding: 12px; }
+.app.agent-tile-board .message-first .agent-sidebar h2 { font-size: clamp(13px, 3cqw, 22px); }
+.app.agent-tile-board .message-first .agent-sidebar time { font-size: clamp(11px, 2.3cqw, 18px); }
+.app.agent-tile-board .message-first .message-heading { flex-wrap: wrap; gap: 4px 8px; font-size: 10px; }
+.app.agent-tile-board .message-first .message-heading .model-identity { max-width: 100%; }
+.app.agent-tile-board .message-first .message-agent-name { max-width: 40%; }
+.app.agent-tile-board .message-first .message-focus { font-size: clamp(19px, min(6cqw, 12cqh), 40px); }
+.app.agent-tile-board .message-first .sidebar-status strong { font-size: 11px; }
+.app.agent-tile-board .message-first .sidebar-status span { font-size: 10px; }
+
+@media (max-width: 700px) {
+  .app .workstream-board:has(.message-first) { overflow-y: auto; grid-auto-rows: minmax(320px, 1fr); }
+  .app .workstream.message-first { --identity-width: 25%; column-gap: 14px; row-gap: 10px; }
+  .app .message-first .agent-sidebar h2 { font-size: clamp(14px, 3.5vw, 23px); }
+  .app .message-first .agent-sidebar time { font-size: clamp(11px, 2.5vw, 17px); }
+  .message-heading { flex-wrap: wrap; gap: 4px 8px; }
+  .message-heading .model-identity { max-width: 100%; }
+  .message-agent-name { max-width: 45%; }
+  .message-focus { font-size: clamp(21px, min(7cqw, 10cqh), 40px); }
+  .sidebar-status strong { font-size: 11px; }
+  .sidebar-status span { font-size: 10px; }
+  .app .message-first .agent-tool { display: none; }
+  .app .message-first .agent-team { max-height: 42%; }
+}
+
+@media (max-height: 650px) and (min-width: 701px) {
+  .app .workstream-board:has(.message-first) { overflow-y: auto; grid-auto-rows: minmax(190px, 1fr); }
+}

@@ -1,4 +1,5 @@
 import { displayText } from "./core/displayText";
+import { currentMessage } from "./core/currentMessage";
 import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { subagentAssignment, subagentColor } from "./components/subagentPresentation";
@@ -37,6 +38,7 @@ import {
   type Workstream,
 } from "./core/workstreams";
 import "./styles.css";
+import "./message-layout.css";
 import { advanceRunRecap, type RunRecap } from "./core/runRecap";
 import { RunCelebration } from "./components/RunCelebration";
 import { useCompletionSound } from "./components/useCompletionSound";
@@ -342,69 +344,6 @@ function AgentPlan({ plan, privacy }: { plan: string[]; privacy: boolean }) {
   </section>;
 }
 
-function FittedStateLabel({ label }: { label: string }) {
-  const heading = useRef<HTMLHeadingElement>(null);
-  const copy = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const frame = heading.current;
-    const text = copy.current;
-    if (!frame || !text) return;
-    if (CSS.supports("text-fit", "shrink")) {
-      text.style.removeProperty("--state-label-scale");
-      return;
-    }
-    const fit = () => {
-      text.style.setProperty("--state-label-scale", "1");
-      const available = frame.clientWidth;
-      const required = text.scrollWidth;
-      const scale = available > 0 && required > available ? Math.max(.58, available / required) : 1;
-      text.style.setProperty("--state-label-scale", String(scale));
-    };
-    const observer = new ResizeObserver(fit);
-    observer.observe(frame);
-    fit();
-    void document.fonts?.ready.then(fit);
-    return () => observer.disconnect();
-  }, [label]);
-  return <h1 ref={heading} className="state-label"><span ref={copy}>{label}</span></h1>;
-}
-
-function ContentFittedActivity({ children }: { children: React.ReactNode }) {
-  const activity = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const element = activity.current;
-    if (!element) return;
-    let frame = 0;
-    const overflows = () => {
-      const bounds = element.getBoundingClientRect();
-      return [...element.children].some((child) => {
-        const content = child.getBoundingClientRect();
-        return content.top < bounds.top - 1 || content.bottom > bounds.bottom + 1;
-      });
-    };
-    const fit = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        for (const density of ["roomy", "compact", "tight"]) {
-          element.dataset.fit = density;
-          if (!overflows()) break;
-        }
-      });
-    };
-    const resize = new ResizeObserver(fit);
-    const mutation = new MutationObserver(fit);
-    resize.observe(element);
-    mutation.observe(element, { childList: true, characterData: true, subtree: true });
-    fit();
-    return () => {
-      cancelAnimationFrame(frame);
-      resize.disconnect();
-      mutation.disconnect();
-    };
-  }, []);
-  return <div ref={activity} className="workstream-activity" data-fit="roomy">{children}</div>;
-}
-
 function latestImagePath(agent: AgentSession) {
   return agent.state.recent.find((event) => event.tool === "view_image" && typeof event.target === "string")?.target ?? "";
 }
@@ -434,19 +373,27 @@ function AgentPreview({ path, privacy }: { path: string; privacy: boolean }) {
   </figure>;
 }
 
-const AgentLine = memo(function AgentLine({ agent, index, privacy, trailLimit }: { agent: AgentSession; index: number; privacy: boolean; trailLimit: number }) {
-  const available = activitySteps(agent, privacy, 80);
-  // Public narrative owns the room-scale line. Tool commands remain available
-  // in the compact rolling history, where operational detail belongs.
-  const focus = available.find((step) => step.narrativeKind !== null) ?? available[0];
-  const telemetry = available.filter((step) => step.narrativeKind === null).slice(0, Math.max(3, trailLimit));
-  return <li className={`agent-line status-${agent.state.status}`}>
-    {focus && <div className={`agent-focus status-${focus.status}`}>
-      <i className="agent-pulse" aria-hidden="true" />
-      <span className="agent-number">{String(index + 1).padStart(2, "0")}</span>
-      <span className="agent-focus-copy">{headlineDetail(focus)}</span>
-    </div>}
-    <AgentPlan plan={agent.state.plan} privacy={privacy} />
+const AgentLine = memo(function AgentLine({ agent, privacy }: { agent: AgentSession; privacy: boolean }) {
+  const message = currentMessage(agent, privacy);
+  const focus = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = focus.current;
+    if (!element) return;
+    const fit = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+      element.style.setProperty("--message-lines", String(Math.max(1, Math.floor(element.clientHeight / lineHeight))));
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    fit();
+    void document.fonts?.ready.then(fit);
+    return () => observer.disconnect();
+  }, [message]);
+  const telemetry = activitySteps(agent, privacy, 80).filter(step => step.narrativeKind === null).slice(0, 1);
+  return <li className={`agent-message status-${agent.state.status}`}>
+    <div ref={focus} className={`message-focus ${message ? "" : "awaiting-update"}`}>
+      <span className="message-copy" title={message}>{message || "Waiting for an update"}</span>
+    </div>
     <RollingActivity steps={telemetry} />
   </li>;
 });
@@ -476,7 +423,7 @@ function AgentTeam({ agents, privacy, family }: { agents: AgentSession[]; privac
   </section>;
 }
 
-const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, privacy, agentLimit, trailLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number; trailLimit: number }) {
+const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, privacy, agentLimit }: { workstream: Workstream; personality: number; privacy: boolean; agentLimit: number }) {
   const children = workstream.agents.filter(agent => Boolean(agent.parentSessionId));
   const parents = workstream.agents.filter(agent => !agent.parentSessionId);
   const visibleAgents = parents.slice(0, agentLimit);
@@ -486,26 +433,28 @@ const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, pri
   const titledAgents = rootAgents.some((agent) => agent.sessionTitle) ? rootAgents : workstream.agents;
   const sessionTitles = [...new Set(titledAgents.map((agent) => displayText(agent.sessionTitle, "")).filter((title) => title && title.toLowerCase() !== workstream.name.toLowerCase()))];
   const sessionTitle = privacy || !sessionTitles.length ? "" : `${sessionTitles[0]}${sessionTitles.length > 1 ? ` +${sessionTitles.length - 1}` : ""}`;
-  return <article className={`workstream status-${workstream.status} ${children.length ? "has-team" : "single-agent"} ${workstream.attention ? "needs-attention" : ""}`}>
-    <div className="workstream-identity">
-      <div className="project-heading"><h2>{workstream.name}</h2><span>×{workstream.agents.length}</span></div>
-      {sessionTitle && <p className="session-title" title={sessionTitles.join(" + ")}>{sessionTitle}</p>}
-      <div className="identity-meta">
-        <ModelIdentity agents={parents.length ? parents : workstream.agents.slice(0, 1)} />
-      </div>
+  return <article className={`workstream message-first status-${workstream.status} ${children.length ? "has-team" : "single-agent"} ${workstream.attention ? "needs-attention" : ""}`}>
+    <aside className="agent-sidebar">
+      <div className="project-heading"><h2>{privacy ? "WORKSTREAM" : workstream.name}</h2><span>×{workstream.agents.length}</span></div>
+      <WorkstreamElapsed workstream={workstream} />
+      <div className="agent-stage"><FaceVisual status={parents[0]?.state.status ?? workstream.status} phase={parents[0]?.state.phase ?? workstream.phase} label={workstream.label} seed={personality} personality={personality} attention={workstream.attention} /></div>
+      <div className="sidebar-status"><strong>{workstream.label}</strong>{workstream.phase === "planning" && <span>Planning the next step</span>}</div>
+      <AgentPreview path={previewPath} privacy={privacy} />
+    </aside>
+    <div className="message-heading">
+      {sessionTitle && <span className="message-task" title={sessionTitles.join(" + ")}>{sessionTitle}</span>}
+      <span className="message-agent-name">{privacy ? "AGENT" : parents[0]?.agentName ?? "AGENT"}</span>
+      <ModelIdentity agents={parents.length ? parents : workstream.agents.slice(0, 1)} />
     </div>
-    <FaceVisual status={parents[0]?.state.status ?? workstream.status} phase={parents[0]?.state.phase ?? workstream.phase} label={workstream.label} seed={personality} personality={personality} attention={workstream.attention} />
-    <ContentFittedActivity>
-      <FittedStateLabel label={workstream.label} />
-      <ol>{visibleAgents.map((agent, index) => <AgentLine key={agent.id} agent={agent} index={index} privacy={privacy} trailLimit={trailLimit} />)}</ol>
+    <div className="message-panel">
+      <ol>{visibleAgents.map(agent => <AgentLine key={agent.id} agent={agent} privacy={privacy} />)}</ol>
       {extra > 0 && <p className="extra-agents">+ {extra} MORE AGENTS</p>}
       {children.length > 0 && <AgentTeam agents={children} privacy={privacy} family={personality} />}
-    </ContentFittedActivity>
-    <div className="workstream-visual"><WorkstreamElapsed workstream={workstream} /><AgentPreview path={previewPath} privacy={privacy} /></div>
+    </div>
   </article>;
 }, (previous, next) => {
   if (previous.personality !== next.personality || previous.privacy !== next.privacy
-    || previous.agentLimit !== next.agentLimit || previous.trailLimit !== next.trailLimit) return false;
+    || previous.agentLimit !== next.agentLimit) return false;
   const a = previous.workstream;
   const b = next.workstream;
   return a.id === b.id && a.name === b.name && a.status === b.status && a.phase === b.phase
@@ -616,7 +565,6 @@ function App() {
   const useAgentTiles = boardWorkstreams.length > 5;
   const displayWorkstreams = boardWorkstreams;
   const rowBudget = (viewport.height - 64) / Math.max(1, useAgentTiles ? Math.ceil(displayWorkstreams.length / 3) : displayWorkstreams.length);
-  const trailLimit = rowBudget >= 300 ? 5 : rowBudget >= 235 ? 4 : rowBudget >= 175 ? 3 : rowBudget >= 125 ? 2 : 1;
   const agentLimit = viewport.width < 700 ? 1 : rowBudget >= 300 ? 4 : rowBudget >= 220 ? 3 : rowBudget >= 155 ? 2 : 1;
 
   const apply = (event: AgentEvent, source = "protocol") => setSessions((old) => applySessionEvent(old, event, Date.now(), source));
@@ -722,7 +670,7 @@ function App() {
       : showRecap
         ? <RunCelebration key={recap.startedAt} recap={recap} />
       : displayWorkstreams.length > 0
-      ? <section className="workstream-board" aria-live="polite">{displayWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.agents[0].workstreamId)} privacy={privacy} agentLimit={agentLimit} trailLimit={trailLimit} />)}</section>
+      ? <section className="workstream-board" aria-live="polite">{displayWorkstreams.map((workstream) => <WorkstreamRow key={workstream.id} workstream={workstream} personality={faceHash(workstream.agents[0].workstreamId)} privacy={privacy} agentLimit={agentLimit} />)}</section>
       : <OperationalReady />}
 
     <nav className="board-controls" aria-label="Display controls">
@@ -739,7 +687,7 @@ function App() {
       <div className="inspection-heading"><h2>ACTIVITY & STATUS</h2><button onClick={() => setInspection(false)} aria-label="Close activity and status">×</button></div>
       <div className="completion-sound-controls"><span>Completion sound {completionSound.enabled ? "on" : "off"}</span><button onClick={() => void completionSound.preview()}>Preview chime</button>{completionSound.error && <p role="status">{completionSound.error}</p>}</div>
       <div className="inspection-status"><p>{summary}</p>{syncError && <p role="alert">{syncError}</p>}<p className="quiet">{privacy ? "Privacy on · activity text hidden" : "Privacy off · activity text visible"}</p></div>
-      {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : displayText((showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status, agent.state.label)}</span></article>)}</section>)}
+      {(showRecap ? groupWorkstreams(recap.participants, recap.endedAt ?? now, Infinity) : workstreams).map((workstream) => <section key={workstream.id}><h3>{privacy ? "WORKSTREAM" : workstream.name}</h3>{workstream.agents.map((agent) => <article key={agent.id}><b>{privacy ? agent.state.label : `${agent.agentName} · ${agent.state.label}`}</b><span>{privacy ? "Activity hidden" : displayText((showRecap && agent.lastMessage) || agent.state.detail || agent.state.command || agent.state.status, agent.state.label)}</span><AgentPlan plan={agent.state.plan} privacy={privacy} /><ol className="inspection-history">{activitySteps(agent, privacy, 10).map(step => <li key={step.id}>{step.label} · {step.detail}</li>)}</ol></article>)}</section>)}
       {!showRecap && workstreams.length === 0 && <p className="quiet">No live activity.</p>}
     </aside>}
 

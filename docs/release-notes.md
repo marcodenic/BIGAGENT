@@ -1,8 +1,10 @@
-# BIG AGENT 0.1.17 preview
+# BIG AGENT 0.1.18 preview
 
-- Fix completed or stopped Codex subagents remaining active when the live feed takes over from local session monitoring. Completion records now have distinct IDs so they are not discarded as duplicate activity.
-- Re-check the runtime status of active subscribed Codex threads, recovering missed completion notifications even when the finished thread remains loaded.
-- Ignore stale status responses when a new turn starts during a check, preventing an old response from ending new work.
+- Put the agent’s current message first: larger white text uses the main reading area, with one compact tool-activity line below it.
+- Move the smaller timer directly beneath the project name. Give the animated character more of the left sidebar, with a compact status beneath it.
+- Combine the task description, agent name, and model details in a slim header, and tighten the space above the display controls.
+- Keep the latest useful update visible through planning and tool activity, including long tool runs. New turns clear the previous update; requests for input, errors, and completion still take priority.
+- Keep recent activity and plan details available in Activity and status. Preserve responsive layouts, subagent controls, image previews, and privacy mode.
 
 ## Mac download
 
