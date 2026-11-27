@@ -53,6 +53,9 @@
 .sidebar-status { position: relative; z-index: 2; flex: none; text-align: center; color: var(--status-color); padding-top: 4px; }
 .sidebar-status strong { display: block; font: 500 clamp(11px, min(1.1cqw, 4.8cqh), 20px)/1.2 "Geist Mono Variable", monospace; overflow-wrap: anywhere; letter-spacing: .04em; }
 .sidebar-status span { display: block; margin-top: 3px; color: #94998b; font: 400 clamp(10px, min(.85cqw, 3.8cqh), 15px)/1.2 "Geist Mono Variable", monospace; }
+/* Keep the same wrapped text footprint when planning ends, so the status and
+   flexible character stage retain their positions at every sidebar width. */
+.sidebar-status span[aria-hidden="true"] { visibility: hidden; }
 .app .message-first .agent-sidebar .agent-preview {
   --preview-max-width: 100%;
   --preview-height: min(24cqh, 150px);

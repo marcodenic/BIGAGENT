@@ -1,10 +1,7 @@
-# BIG AGENT 0.1.18 preview
+# BIG AGENT 0.1.19 preview
 
-- Put the agent’s current message first: larger white text uses the main reading area, with one compact tool-activity line below it.
-- Move the smaller timer directly beneath the project name. Give the animated character more of the left sidebar, with a compact status beneath it.
-- Combine the task description, agent name, and model details in a slim header, and tighten the space above the display controls.
-- Keep the latest useful update visible through planning and tool activity, including long tool runs. New turns clear the previous update; requests for input, errors, and completion still take priority.
-- Keep recent activity and plan details available in Activity and status. Preserve responsive layouts, subagent controls, image previews, and privacy mode.
+- Fix the left sidebar shifting when “Planning the next step” appears or disappears. Its space remains reserved, including when the text wraps in narrow layouts, so the timer, character area, and status stay in place.
+- Hide the inactive planning text visually and from screen readers.
 
 ## Mac download
 

@@ -438,7 +438,10 @@ const WorkstreamRow = memo(function WorkstreamRow({ workstream, personality, pri
       <div className="project-heading"><h2>{privacy ? "WORKSTREAM" : workstream.name}</h2><span>×{workstream.agents.length}</span></div>
       <WorkstreamElapsed workstream={workstream} />
       <div className="agent-stage"><FaceVisual status={parents[0]?.state.status ?? workstream.status} phase={parents[0]?.state.phase ?? workstream.phase} label={workstream.label} seed={personality} personality={personality} attention={workstream.attention} /></div>
-      <div className="sidebar-status"><strong>{workstream.label}</strong>{workstream.phase === "planning" && <span>Planning the next step</span>}</div>
+      <div className="sidebar-status">
+        <strong>{workstream.label}</strong>
+        <span aria-hidden={workstream.phase !== "planning"}>Planning the next step</span>
+      </div>
       <AgentPreview path={previewPath} privacy={privacy} />
     </aside>
     <div className="message-heading">
