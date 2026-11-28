@@ -1,4 +1,5 @@
 import { currentMessage } from "./currentMessage";
+import { TelemetryHub } from "../../electron/telemetry/hub";
 import { claudeRegistryEvent } from "../../electron/providers/claude";
 import { elapsedMs } from "./reducer";
 import { describe, expect, it } from "vitest";
@@ -15,6 +16,52 @@ function apply(sessions: Record<string, AgentSession>, event: AgentEvent, now: n
 }
 
 describe("end-to-end lifecycle projection", () => {
+  it("assembles Claude display batches and retains them across empty final batches and tool traffic", () => {
+    const hub = new TelemetryHub();
+    let sessions: Record<string, AgentSession> = {};
+    let time = 1000;
+    hub.onEvent(event => { sessions = applySessionEvent(sessions, event, time, "claude-hooks"); });
+    const send = (fields: Record<string, unknown>) => hub.ingest({
+      source: "claude-hooks", product: "claude", transport: "http", format: "hook", receivedAt: ++time,
+      payload: { session_id: "claude", prompt_id: "prompt", ...fields },
+    });
+    send({ hook_event_name: "UserPromptSubmit" });
+    const batch = (index: number, delta: string, final = false, message_id = "message") => send({
+      hook_event_name: "MessageDisplay", turn_id: "display-turn", message_id, index, delta, final,
+    });
+    batch(0, "Checking capacity limits.\n");
+    batch(2, ""); // An empty final callback may arrive before another batch.
+    batch(1, "The server is still listening.\n");
+    batch(1, "The server is still listening.\n");
+    batch(3, "", true);
+    for (let i = 0; i < 90; i++) send({ hook_event_name: "PostToolUse", tool_name: "Read", tool_use_id: `tool-${i}` });
+    expect(currentMessage(sessions.claude, false)).toBe("Checking capacity limits. The server is still listening.");
+    // Non-interactive Claude sends the whole message in one final batch.
+    batch(0, "The audit is complete.", true, "next-message");
+    expect(currentMessage(sessions.claude, false)).toBe("The audit is complete.");
+    send({ hook_event_name: "UserPromptSubmit", prompt_id: "next-prompt" });
+    expect(sessions.claude.messageStream).toBeUndefined();
+    expect(currentMessage(sessions.claude, false)).toBe("");
+  });
+
+  it("keeps Claude messages and the timer when message hooks include a distinct turn ID", () => {
+    const hook = (name: string, fields: Record<string, unknown> = {}, time = 1000) => normalizeTelemetry({
+      source: "claude-hooks", product: "claude", transport: "http", format: "hook", receivedAt: time,
+      payload: { hook_event_name: name, session_id: "claude", prompt_id: "prompt-1", ...fields },
+    })[0];
+    let sessions = applySessionEvent({}, hook("UserPromptSubmit"), 1000, "claude-hooks");
+    const message = hook("MessageDisplay", { turn_id: "display-turn", message_id: "message-1", index: 0, delta: "Checking capacity limits.\n" }, 2000);
+    sessions = applySessionEvent(sessions, message, 2000, "claude-hooks");
+    expect(currentMessage(sessions.claude, false)).toBe("Checking capacity limits.");
+    sessions = applySessionEvent(sessions, hook("PostToolUse", { tool_name: "Read", tool_use_id: "tool-1" }, 3000), 3000, "claude-hooks");
+    expect(currentMessage(sessions.claude, false)).toBe("Checking capacity limits.");
+    expect(sessions.claude.state.startedAt).toBe(1000);
+    expect(sessions.claude.runId).toBe("prompt-1");
+    sessions = applySessionEvent(sessions, hook("UserPromptSubmit", { prompt_id: "prompt-2" }, 4000), 4000, "claude-hooks");
+    expect(currentMessage(sessions.claude, false)).toBe("");
+    expect(sessions.claude.state.startedAt).toBe(4000);
+  });
+
   it.each([undefined, "idle"])("keeps a live hook message when the registry catches up from %s", previousState => {
     let now = Date.now();
     const hook = (payload: Record<string, unknown>) => normalizeTelemetry({

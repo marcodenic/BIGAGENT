@@ -1,7 +1,8 @@
-# BIG AGENT 0.1.20 preview
+# BIG AGENT 0.1.21 preview
 
-- Fix Claude messages flashing and disappearing when a delayed agent registry update arrives after live activity. Background status checks now preserve the current message and timer.
-- Keep genuine new requests and sessions observed only through the registry working as before, with regression tests for both paths.
+- Fix Claude messages disappearing after tool results when message hooks carry a separate turn ID. Claude hooks now consistently use the shared prompt ID, preserving the current message and timer until a genuine new request.
+- Assemble streamed message batches in order, handle duplicate delivery, and retain text when the final batch is empty. This also supports complete messages sent by non-interactive Claude runs.
+- Add regression coverage for the documented hook payloads, long tool sequences, and new-request resets.
 
 ## Mac download
 

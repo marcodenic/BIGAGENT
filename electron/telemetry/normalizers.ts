@@ -117,7 +117,11 @@ function sessionMetadata(payload: Json, envelope: TelemetryEnvelope, extra: Json
     sessionId,
     parentSessionId,
     threadId: claudeAgentId ? claudeParentId : text(thread.id, payload.thread_id, payload.threadId),
-    turnId: text(payload.turn_id, payload.turnId, payload.execution_id, payload.executionId, payload.prompt_id, payload.promptId, payload.generation_id, payload.generationId, extra.turnId),
+    // Claude's prompt ID is shared by lifecycle, tool and message hooks.
+    // MessageDisplay also has a turn_id; preferring that only for messages
+    // makes every subsequent tool hook appear to start a different run.
+    turnId: text(envelope.product === "claude" && envelope.format === "hook" ? text(payload.prompt_id, payload.promptId) : undefined,
+      payload.turn_id, payload.turnId, payload.execution_id, payload.executionId, payload.prompt_id, payload.promptId, payload.generation_id, payload.generationId, extra.turnId),
     workstreamId,
     workstreamName: text(project.name, payload.project_name, payload.projectName, cwd?.split(/[\\/]/).filter(Boolean).pop()),
     project: text(project.name, payload.project_name, payload.projectName, cwd),
@@ -268,12 +272,12 @@ function hookEvents(envelope: TelemetryEnvelope) {
   if (/subagentstop|subagentend/.test(eventName)) return [makeEvent(envelope, payload, "working", "activity", { ...common, phase: "receiving", label: "RECEIVING", detail: "Subagent result received" })];
   if (/userpromptsubmit/.test(eventName)) return [makeEvent(envelope, payload, "thinking", "turn.start", { ...common, phase: "starting", label: "STARTING", detail: "New request received" })];
   if (/messagedisplay/.test(eventName)) {
-    const delta = text(payload.delta);
+    const delta = typeof payload.delta === "string" ? payload.delta : "";
     return [makeEvent(envelope, payload, "working", "activity", {
       ...common,
       phase: "responding",
       label: "RESPONDING",
-      detail: delta || "Writing a response",
+      detail: delta.trim(),
       meta: {
         rawEventName: rawName,
         activityClass: "narrative",
@@ -281,6 +285,7 @@ function hookEvents(envelope: TelemetryEnvelope) {
         messageId,
         messageIndex,
         messageFinal: payload.final === true,
+        messageDelta: delta,
       },
     })];
   }
